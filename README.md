@@ -10,7 +10,7 @@ After cloning this repository run the following commands from the root level of 
 ```
 go build -o seer
 mv seer /usr/local/bin/
-chmod +x /usr/local/bin
+chmod +x /usr/local/bin/seer
 ```
 
 ### Completion
@@ -48,12 +48,24 @@ root@system:/# seer procs list
 └ link: /usr/local/bin/seer md5: 6e1039cb500090fc441fff8dd08d1e7b
 ```
 
-Expire any users whose name ends in "-contractor"
+Describe the user `alice`
 ```
-root@system:/# seer user expire -r "\-contractor$"
+root@system:/# seer user describe alice
+┌ alice (1000)
+├ Home: /home/alice
+├ Shell: /bin/sh
+├ Primary Group: alice
+├ Secondary Groups: [sudo]
+├ Password: !
+└ Expired: false
+```
+
+Expire any users whose name ends in `-contractor`
+```
+root@system:/# seer users expire -r "\-contractor$"
 The following 2 user(s) will be modified:
-  alice-contractor
+  mallory-contractor
   bob-contractor
 Continue? (yes/no): yes
-root@system:/# 
+Modified 2 user(s).
 ```
