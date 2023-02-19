@@ -16,10 +16,13 @@ type User struct {
 	Username string
 	Password Password
 	Uid      int    // User id
-	Gid      int    // Primary group id
 	Gecos    string // Comma separated user details
 	Home     string // Home directory
 	Shell    string // Login shell
+
+	// Groups that the user is a member of
+	PrimaryGroup    Group
+	SecondaryGroups []Group
 }
 
 func (u User) Expire() error {
@@ -44,18 +47,37 @@ func (u User) UnExpire() error {
 	return nil
 }
 
+func (u User) String() string {
+	return fmt.Sprintf("%s (%d) %s %s %t\n",
+		u.Username,
+		u.Uid,
+		u.Shell,
+		u.Password.Password,
+		u.Password.IsExpired(),
+	)
+}
+
 func (u User) Describe() string {
 	desc := "┌ %s (%d)\n"
 	desc += "├ Home: %s\n"
 	desc += "├ Shell: %s\n"
+	desc += "├ Primary Group: %s\n"
+	desc += "├ Secondary Groups: %s\n"
 	desc += "├ Password: %s\n"
 	desc += "└ Expired: %t\n"
+
+	secondary_groups := make([]string, 0)
+	for _, g := range u.SecondaryGroups {
+		secondary_groups = append(secondary_groups, g.Name)
+	}
 	return fmt.Sprintf(
 		desc,
 		u.Username,
 		u.Uid,
 		u.Home,
 		u.Shell,
+		u.PrimaryGroup.Name,
+		secondary_groups,
 		u.Password.Password,
 		u.Password.IsExpired())
 }
@@ -65,6 +87,17 @@ func GetUsers() (map[string]User, error) {
 	if err != nil {
 		log.Printf("Warning: %s\n", err)
 		passwords = map[string]Password{}
+	}
+	groups, err := GetGroups()
+	if err != nil {
+		log.Printf("Warning: %s\n", err)
+		groups = map[string]Group{}
+	}
+	groups_map := make(map[string][]Group)
+	for g := range groups {
+		for _, m := range groups[g].Members {
+			groups_map[m] = append(groups_map[m], groups[g])
+		}
 	}
 
 	passwd, err := os.Open("/etc/passwd")
@@ -93,15 +126,23 @@ func GetUsers() (map[string]User, error) {
 		if err != nil {
 			user_gid = -1
 		}
+		var primary_group Group
+		for _, g := range groups {
+			if g.Id == user_gid {
+				primary_group = g
+				break
+			}
+		}
 
 		user := User{
-			Username: user_data[0],
-			Password: passwords[user_data[0]],
-			Uid:      user_id,
-			Gid:      user_gid,
-			Gecos:    user_data[4],
-			Home:     user_data[5],
-			Shell:    user_data[6],
+			Username:        user_data[0],
+			Password:        passwords[user_data[0]],
+			Uid:             user_id,
+			Gecos:           user_data[4],
+			Home:            user_data[5],
+			Shell:           user_data[6],
+			PrimaryGroup:    primary_group,
+			SecondaryGroups: groups_map[user_data[0]],
 		}
 
 		users[user.Username] = user

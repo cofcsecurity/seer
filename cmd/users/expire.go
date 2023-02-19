@@ -59,6 +59,7 @@ func UsersExpire() *cobra.Command {
 				fmt.Printf("Canceled.\n")
 				return
 			}
+			modified := 0
 			for _, u := range targets {
 				user, exists := users_map[u]
 				if exists {
@@ -69,11 +70,14 @@ func UsersExpire() *cobra.Command {
 					}
 					if err != nil {
 						log.Printf("Warning: %s\n", err)
+					} else {
+						modified += 1
 					}
 				} else {
 					log.Printf("Warining: The user '%s' does not exist\n", u)
 				}
 			}
+			fmt.Printf("Modified %d user(s).\n", modified)
 		},
 	}
 

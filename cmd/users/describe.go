@@ -17,13 +17,23 @@ func UsersDescribe() *cobra.Command {
 		Short: "Describe users",
 		Long: `Describe information about a user or users. 
 Optionally use regex or inverse regex matching to filter users.`,
-		Args: cobra.MinimumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			users_map, err := users.GetUsers()
 			if err != nil {
 				log.Printf("%s\n", err)
 			}
+			if len(args) == 0 && cmd.Flags().NFlag() == 0 {
+				for _, u := range users_map {
+					fmt.Print(u.Describe())
+				}
+				return
+			}
 			if regex || iregex {
+				if len(args) == 0 {
+					fmt.Print("No patterns supplied.\n\n")
+					cmd.Help()
+					return
+				}
 				matches := make(map[string]users.User)
 				for _, p := range args {
 					re, err := regexp.Compile(p)

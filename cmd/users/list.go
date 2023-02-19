@@ -25,7 +25,7 @@ func UsersList() *cobra.Command {
 
 			sort.Slice(users, func(i, j int) bool { return users[i].Uid < users[j].Uid })
 			for _, u := range users {
-				fmt.Print(u.Describe())
+				fmt.Print(u.String())
 			}
 		},
 	}
