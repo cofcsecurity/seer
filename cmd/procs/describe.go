@@ -14,8 +14,8 @@ func ProcsDescribe() *cobra.Command {
 		Short: "Describe processes",
 		Long:  `Describe information about a process or processes.`,
 		Run: func(cmd *cobra.Command, args []string) {
+			procs := proc.GetProcesses()
 			if len(args) == 0 {
-				procs := proc.GetProcesses()
 				for _, p := range procs {
 					fmt.Print(p.Describe())
 				}
@@ -27,12 +27,11 @@ func ProcsDescribe() *cobra.Command {
 						cmd.Help()
 						return
 					}
-					p, err := proc.GetProcess(pid)
-					if err != nil {
-						fmt.Printf("Warning: %s\n", err)
-						continue
+					if p, exists := procs[pid]; exists {
+						fmt.Print(p.Describe())
+					} else {
+						fmt.Printf("Warning: the process '%d' does not exist\n", pid)
 					}
-					fmt.Print(p.Describe())
 				}
 			}
 		},

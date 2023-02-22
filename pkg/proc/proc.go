@@ -110,7 +110,7 @@ func (p Process) Describe() string {
 	)
 }
 
-func GetProcess(pid int) (Process, error) {
+func getProcess(pid int) (Process, error) {
 	proc := Process{Pid: pid}
 	procDir := fmt.Sprintf("/proc/%d", pid)
 
@@ -213,7 +213,7 @@ func GetProcesses() map[int]Process {
 		}
 
 		id, _ := strconv.Atoi(ename)
-		proc, _ := GetProcess(id)
+		proc, _ := getProcess(id)
 		procs[proc.Pid] = proc
 	}
 

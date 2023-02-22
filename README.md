@@ -35,17 +35,19 @@ For a complete list of subcommands and options use `seer -h` and `seer [subcomma
 
 ### Examples
 
-List processes
+List and describe processes
 ```
-root@system:/# seer procs list
-┌ [1] (bash)
-├ state: S tty: 34816 session: 1 ppid: 0
-├ uid: 0 euid: 0
-└ link: /usr/bin/bash md5: 7063c3930affe123baecd3b340f1ad2c
-┌ [10] (seer)
-├ state: R tty: 34816 session: 1 ppid: 1
-├ uid: 0 euid: 0
-└ link: /usr/local/bin/seer md5: 6e1039cb500090fc441fff8dd08d1e7b
+root@system:/# seer proc list
+[1] /usr/bin/bash (/bin/bash) root 42s
+[54] /usr/local/bin/seer (seerproclist) root 0s
+root@system:/# seer proc describe 1
+┌[1] /usr/bin/bash
+├ cmdline: /bin/bash
+├ state: S age: 65s
+├ parent: 0 (sched)
+├ user: root  euid: 0
+├ exe deleted: false
+└ md5: 7063c3930affe123baecd3b340f1ad2c
 ```
 
 Describe the user `alice`
