@@ -20,13 +20,13 @@ func groupByExe(procs map[int]proc.Process) {
 		exes[exe] = append(exes[exe], p)
 	}
 	for e := range exes {
-		fmt.Printf("┌ %s (Count: %d)\n", e, len(exes[e]))
+		fmt.Printf("┌<%s> (Count: %d)\n", e, len(exes[e]))
 		for i, p := range exes[e] {
 			line := '├'
 			if i == len(exes[e])-1 {
 				line = '└'
 			}
-			fmt.Printf("%c [-] (%d) -> (%d) %s started at %d\n", line, p.Ppid, p.Pid, p.Cmdline, p.Starttime)
+			fmt.Printf("%c[%d]->[%d] %s started %d seconds ago by %s\n", line, p.Ppid, p.Pid, p.Cmdline, p.Age(), p.User.Username)
 		}
 	}
 }
@@ -51,7 +51,7 @@ func ProcsList() *cobra.Command {
 
 				sort.Slice(procs, func(i, j int) bool { return procs[i].Pid < procs[j].Pid })
 				for _, p := range procs {
-					fmt.Print(p.Describe())
+					fmt.Print(p.String())
 				}
 			}
 		},

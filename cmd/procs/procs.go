@@ -12,6 +12,8 @@ func Procs() *cobra.Command {
 	}
 
 	procs.AddCommand(ProcsList())
+	procs.AddCommand(ProcsDescribe())
+	procs.AddCommand(ProcsTree())
 
 	return procs
 }
