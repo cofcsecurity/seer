@@ -2,11 +2,11 @@ package proc
 
 import (
 	"crypto/md5"
-	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"seer/pkg/users"
 	"strconv"
 	"strings"
 )
@@ -49,27 +49,63 @@ type Process struct {
 	Suid int // Saved set user id
 	Fuid int // Filesystem user id
 
+	User users.User
+
 	// fds/sockets
 	//sockets []Socket // Sockets related to the process
 	//fds []Fd // Open file descriptors
+
+	Parent   *Process
+	Children []*Process
+}
+
+// Get the approximate process age in seconds
+func (p Process) Age() int {
+	raw_uptime, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		log.Printf("Failed to read /proc/uptime: %s\n", err)
+		return -1
+	}
+	uptime, err := strconv.Atoi(strings.Split(string(raw_uptime), ".")[0])
+	if err != nil {
+		log.Printf("Failed to convert uptime to int: %s\n", err)
+		return -1
+	}
+
+	return uptime - (int(p.Starttime) / 100)
+}
+
+func (p Process) String() string {
+	return fmt.Sprintf("[%d] %s (%s) %s %ds\n",
+		p.Pid, p.Exelink, p.Cmdline, p.User.Username, p.Age(),
+	)
 }
 
 func (p Process) Describe() string {
-	desc := "┌ [%d] (%s)\n"
-	desc += "├ state: %c tty: %d session: %d ppid: %d\n"
-	desc += "├ uid: %d euid: %d\n"
-	desc += "└ link: %s md5: %s\n"
+	desc := "┌[%d] %s\n"
+	desc += "├ cmdline: %s\n"
+	desc += "├ state: %c age: %ds\n"
+	desc += "├ parent: %d (%s)\n"
+	desc += "├ user: %s euid: %d\n"
+	desc += "├ exe deleted: %t\n"
+	desc += "└ md5: %s\n"
+
+	parent := "sched"
+	if p.Parent != nil {
+		parent = p.Parent.Exelink
+	}
 
 	return fmt.Sprintf(desc,
 		p.Pid,
-		p.Comm,
-		p.State,
-		p.Tty_nr,
-		p.Session,
-		p.Ppid,
-		p.Uid,
-		p.Euid,
 		p.Exelink,
+		p.Cmdline,
+		p.State,
+		p.Age(),
+		p.Ppid,
+		parent,
+		p.User.Username,
+		p.Euid,
+		p.Exedel,
 		p.Exesum,
 	)
 }
@@ -79,7 +115,7 @@ func GetProcess(pid int) (Process, error) {
 	procDir := fmt.Sprintf("/proc/%d", pid)
 
 	if _, e := os.Stat(procDir); os.IsNotExist(e) {
-		return proc, errors.New("Process does not exist")
+		return proc, fmt.Errorf("the process '%d' does not exist", pid)
 	}
 
 	// Read data from /proc/[pid]/stat
@@ -179,6 +215,26 @@ func GetProcesses() map[int]Process {
 		id, _ := strconv.Atoi(ename)
 		proc, _ := GetProcess(id)
 		procs[proc.Pid] = proc
+	}
+
+	users, _ := users.GetUsers()
+
+	// Go back through the procs and add extra info
+	// point parents <-> children
+	// Resolve user ids to users
+	for _, p := range procs {
+		if parent, e := procs[p.Ppid]; e {
+			p.Parent = &parent
+			parent.Children = append(parent.Children, &p)
+			procs[p.Ppid] = parent
+		}
+		for _, u := range users {
+			if p.Uid == u.Uid {
+				p.User = u
+				break
+			}
+		}
+		procs[p.Pid] = p
 	}
 
 	return procs
