@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"seer/pkg/users"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -110,6 +111,16 @@ func (p Process) Describe() string {
 	)
 }
 
+func (p Process) GetParents() (parents []Process) {
+	if p.Parent == nil {
+		return
+	} else {
+		parents = append(parents, *p.Parent)
+		parents = append(parents, p.Parent.GetParents()...)
+	}
+	return
+}
+
 func getProcess(pid int) (Process, error) {
 	proc := Process{Pid: pid}
 	procDir := fmt.Sprintf("/proc/%d", pid)
@@ -200,8 +211,8 @@ func getProcess(pid int) (Process, error) {
 	return proc, nil
 }
 
-func GetProcesses() map[int]Process {
-	procs := make(map[int]Process)
+func GetProcesses() []Process {
+	procs := make([]Process, 0)
 	contents, e := os.ReadDir("/proc")
 	if e != nil {
 		log.Print(e.Error())
@@ -214,7 +225,7 @@ func GetProcesses() map[int]Process {
 
 		id, _ := strconv.Atoi(ename)
 		proc, _ := getProcess(id)
-		procs[proc.Pid] = proc
+		procs = append(procs, proc)
 	}
 
 	users, _ := users.GetUsers()
@@ -222,11 +233,13 @@ func GetProcesses() map[int]Process {
 	// Go back through the procs and add extra info
 	// point parents <-> children
 	// Resolve user ids to users
-	for _, p := range procs {
-		if parent, e := procs[p.Ppid]; e {
-			p.Parent = &parent
-			parent.Children = append(parent.Children, &p)
-			procs[p.Ppid] = parent
+	for i, p := range procs {
+		for j, c := range procs {
+			if p.Pid == c.Ppid {
+				p.Children = append(p.Children, &procs[j])
+				c.Parent = &procs[i]
+				procs[j] = c
+			}
 		}
 		for _, u := range users {
 			if p.Uid == u.Uid {
@@ -234,8 +247,9 @@ func GetProcesses() map[int]Process {
 				break
 			}
 		}
-		procs[p.Pid] = p
+		procs[i] = p
 	}
 
+	sort.Slice(procs, func(i, j int) bool { return procs[i].Pid < procs[j].Pid })
 	return procs
 }
