@@ -3,52 +3,90 @@ package procs
 import (
 	"fmt"
 	"seer/pkg/proc"
-	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
 
-func printTree(root int, procs_map map[int]proc.Process) {
-	out := make([]string, 0)
-	if r, exists := procs_map[root]; exists {
-		out = append(out, fmt.Sprintf("[%d] %s %s\n", r.Pid, r.Exelink, r.Cmdline))
-	} else if !exists && root != 0 {
-		fmt.Printf("The process '%d' does not exist.\n", root)
+func printTree(root_pid int, procs []proc.Process) {
+	root_i := -1
+	for i, p := range procs {
+		if p.Pid == root_pid {
+			root_i = i
+			break
+		}
+	}
+	if root_i == -1 && root_pid != 0 {
+		fmt.Printf("The process '%d' does not exist.\n", root_pid)
 		return
 	}
 
-	sorted_procs := make([]proc.Process, 0)
-	for _, p := range procs_map {
-		sorted_procs = append(sorted_procs, p)
-	}
-	sort.Slice(sorted_procs, func(i, j int) bool { return sorted_procs[i].Pid < sorted_procs[j].Pid })
+	// Map of pid -> number of children visited
+	// If a pid is in the map, it has itself been visited
+	visits := make(map[int]int)
 
-	var dfs func(start int, level int, procs []proc.Process)
-	dfs = func(start int, level int, procs []proc.Process) {
-		for _, p := range procs {
-			if p.Ppid == start {
-				line := strings.Repeat("─", level)
-				line += fmt.Sprintf("[%d] %s %s\n", p.Pid, p.Exelink, p.Cmdline)
-				out = append(out, line)
-				dfs(p.Pid, level+1, procs)
+	var dfs func(root int, subtree_root int, current proc.Process)
+	dfs = func(root int, subtree_root int, current proc.Process) {
+		// Mark vertex as visted
+		visits[current.Pid] = 0
+		if current.Parent != nil {
+			if _, exists := visits[current.Parent.Pid]; exists {
+				visits[current.Parent.Pid] += 1
 			}
 		}
-	}
-
-	dfs(root, 0, sorted_procs)
-	for i, l := range out {
-		if i == 0 {
-			if len(out) > 1 {
-				fmt.Print("┌")
+		// Add edges
+		if !(current.Pid == subtree_root) {
+			parents := current.GetParents()
+			edges := make([]string, 0)
+			for i := 0; i < len(parents); i++ {
+				if parents[i].Pid == current.Ppid {
+					// Edge to connect to this vertex's parent
+					if visits[parents[i].Pid] != len(parents[i].Children) {
+						// If there are other unvisited children at this level
+						edges = append(edges, "├")
+					} else {
+						// If this is the last vertex at this level of the subtree
+						edges = append(edges, "└")
+					}
+				} else if visits[parents[i].Pid] != len(parents[i].Children) {
+					// For non parent ancestors with unvisted children
+					edges = append(edges, "│")
+				} else {
+					// For non parent ancestors with no unvisited children
+					edges = append(edges, " ")
+				}
+				if parents[i].Pid == root {
+					// If we are printing a subset of all processes a proceess will
+					// have more parents than we should actually print edges for
+					break
+				}
 			}
-		} else if i == len(out)-1 {
-			fmt.Print("└")
+			// Edges are reversed
+			for i := len(edges) - 1; i >= 0; i-- {
+				fmt.Print(edges[i])
+			}
+		}
+		// Add an edge to connect to any children of this process if needed
+		if len(current.Children) > 0 {
+			fmt.Print("┬")
 		} else {
-			fmt.Print("├")
+			fmt.Print("─")
 		}
-		fmt.Print(l)
+		fmt.Printf("[%d] %s %s\n", current.Pid, current.Exelink, current.Cmdline)
+
+		for _, c := range current.Children {
+			dfs(root, current.Pid, *c)
+		}
+	}
+
+	if root_pid != 0 {
+		dfs(root_pid, root_pid, procs[root_i])
+	} else {
+		for _, p := range procs {
+			if p.Ppid == root_pid {
+				dfs(p.Pid, p.Pid, p)
+			}
+		}
 	}
 }
 
@@ -68,8 +106,8 @@ func ProcsTree() *cobra.Command {
 					return
 				}
 			}
-			proc_map := proc.GetProcesses()
-			printTree(root, proc_map)
+			procs := proc.GetProcesses()
+			printTree(root, procs)
 		},
 	}
 

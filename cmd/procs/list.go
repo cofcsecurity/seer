@@ -3,13 +3,12 @@ package procs
 import (
 	"fmt"
 	"seer/pkg/proc"
-	"sort"
 
 	"github.com/spf13/cobra"
 )
 
 // Print process info with procs grouped by executable
-func groupByExe(procs map[int]proc.Process) {
+func groupByExe(procs []proc.Process) {
 	exes := make(map[string][]proc.Process)
 	for _, p := range procs {
 		exe := p.Exelink
@@ -39,17 +38,11 @@ func ProcsList() *cobra.Command {
 		Aliases: []string{"ls"},
 		Short:   "List running processes",
 		Run: func(cmd *cobra.Command, args []string) {
-			proc_map := proc.GetProcesses()
+			procs := proc.GetProcesses()
 
 			if byExe {
-				groupByExe(proc_map)
+				groupByExe(procs)
 			} else {
-				procs := make([]proc.Process, 0)
-				for _, p := range proc_map {
-					procs = append(procs, p)
-				}
-
-				sort.Slice(procs, func(i, j int) bool { return procs[i].Pid < procs[j].Pid })
 				for _, p := range procs {
 					fmt.Print(p.String())
 				}

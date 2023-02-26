@@ -27,8 +27,15 @@ func ProcsDescribe() *cobra.Command {
 						cmd.Help()
 						return
 					}
-					if p, exists := procs[pid]; exists {
-						fmt.Print(p.Describe())
+					p := -1
+					for i := range procs {
+						if procs[i].Pid == pid {
+							p = i
+							break
+						}
+					}
+					if p != -1 {
+						fmt.Print(procs[p].Describe())
 					} else {
 						fmt.Printf("Warning: the process '%d' does not exist\n", pid)
 					}
