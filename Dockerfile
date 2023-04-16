@@ -15,7 +15,8 @@ RUN mkdir /etc/bash_completion.d/
 RUN seer completion bash > /etc/bash_completion.d/seer
 RUN echo "source /etc/bash_completion" >> /etc/bash.bashrc
 
-RUN apt install screen -y
+# Optional utils
+RUN apt install screen netcat iputils-ping -y
 
 # Set up test data
 RUN useradd alice && usermod -aG sudo alice

@@ -3,6 +3,7 @@ package main
 import (
 	"seer/cmd/groups"
 	"seer/cmd/procs"
+	"seer/cmd/socks"
 	"seer/cmd/users"
 
 	"github.com/spf13/cobra"
@@ -17,6 +18,7 @@ func main() {
 	root.AddCommand(users.Users())
 	root.AddCommand(groups.Groups())
 	root.AddCommand(procs.Procs())
+	root.AddCommand(socks.Socks())
 
 	root.Execute()
 }

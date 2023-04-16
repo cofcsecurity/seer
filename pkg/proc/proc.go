@@ -76,6 +76,25 @@ func (p Process) Age() int {
 	return uptime - (int(p.Starttime) / 100)
 }
 
+func (p Process) GetFds() (fds map[int]string, err error) {
+	fds = make(map[int]string)
+	fd_path := fmt.Sprintf("/proc/%d/fd/", p.Pid)
+	contents, err := os.ReadDir(fd_path)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range contents {
+		link_path := fmt.Sprintf("%s%s", fd_path, entry.Name())
+		link, err := os.Readlink(link_path)
+		if err != nil {
+			continue
+		}
+		id, _ := strconv.Atoi(entry.Name())
+		fds[id] = link
+	}
+	return fds, nil
+}
+
 func (p Process) String() string {
 	return fmt.Sprintf("[%d] %s (%s) %s %ds\n",
 		p.Pid, p.Exelink, p.Cmdline, p.User.Username, p.Age(),
