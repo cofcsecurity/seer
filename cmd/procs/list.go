@@ -84,7 +84,7 @@ func ProcsList() *cobra.Command {
 						children := []string{}
 						if lsFds {
 							for id, fd := range fds {
-								children = append(children, fmt.Sprintf("[%d] -> %s\n", id, fd))
+								children = append(children, fmt.Sprintf("<%d> -> %s\n", id, fd))
 							}
 						} else if lsSockets {
 							for _, s := range p.Sockets {

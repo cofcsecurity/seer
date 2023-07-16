@@ -92,7 +92,7 @@ func (s Socket) String() string {
 		arrow = "<-"
 	}
 
-	return fmt.Sprintf("[%d] %s %s:%d %s %s:%d (%s) i:%d\n",
+	return fmt.Sprintf("<%d> %s %s:%d %s %s:%d (%s) i:%d\n",
 		s.Sl,
 		s.Protocol,
 		s.Local_addr, s.Local_port,
