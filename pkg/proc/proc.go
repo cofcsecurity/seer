@@ -93,13 +93,19 @@ func (p Process) GetFds() (fds map[int]string, err error) {
 }
 
 func (p Process) String() string {
+	// Print comm for kernel threads, cmdline otherwise
+	program := p.Comm
+	if p.Cmdline != "" {
+		program = p.Cmdline
+	}
 	return fmt.Sprintf("[%d] %s (%s) %s %ds\n",
-		p.Pid, p.Exelink, p.Cmdline, p.User.Username, p.Age(),
+		p.Pid, p.Exelink, program, p.User.Username, p.Age(),
 	)
 }
 
 func (p Process) Describe() string {
 	desc := "┌[%d] %s\n"
+	desc += "├ comm: %s\n"
 	desc += "├ cmdline: %s\n"
 	desc += "├ state: %c age: %ds\n"
 	desc += "├ parent: %d\n"
@@ -110,6 +116,7 @@ func (p Process) Describe() string {
 	return fmt.Sprintf(desc,
 		p.Pid,
 		p.Exelink,
+		p.Comm,
 		p.Cmdline,
 		p.State,
 		p.Age(),
