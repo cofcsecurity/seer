@@ -98,8 +98,12 @@ func (p Process) String() string {
 	if p.Cmdline != "" {
 		program = p.Cmdline
 	}
+	exe := p.Exelink
+	if p.Exelink == "" {
+		exe = "kernel"
+	}
 	return fmt.Sprintf("[%d] %s (%s) %s %ds\n",
-		p.Pid, p.Exelink, program, p.User.Username, p.Age(),
+		p.Pid, exe, program, p.User.Username, p.Age(),
 	)
 }
 

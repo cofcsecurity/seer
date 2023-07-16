@@ -72,7 +72,7 @@ func printTree(root_pid int, procs map[int]proc.Process) {
 		} else {
 			fmt.Print("─")
 		}
-		fmt.Printf("[%d] %s %s\n", current.Pid, current.Exelink, current.Cmdline)
+		fmt.Print(current.String())
 
 		for _, c := range current.Children {
 			dfs(root, current.Pid, procs[c], procs)
