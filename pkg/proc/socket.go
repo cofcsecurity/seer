@@ -87,10 +87,16 @@ type Socket struct {
 func (s Socket) String() string {
 	state, _ := strconv.ParseInt(s.State, 16, 0)
 
-	return fmt.Sprintf("[%d] %s %s:%d -> %s:%d (%s) i:%d\n",
+	arrow := "->"
+	if State(state).String() == "LISTEN" {
+		arrow = "<-"
+	}
+
+	return fmt.Sprintf("[%d] %s %s:%d %s %s:%d (%s) i:%d\n",
 		s.Sl,
 		s.Protocol,
 		s.Local_addr, s.Local_port,
+		arrow,
 		s.Remote_addr, s.Remote_port,
 		State(state).String(),
 		s.Inode)
