@@ -3,6 +3,7 @@ package procs
 import (
 	"fmt"
 	"seer/pkg/proc"
+	"sort"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -16,8 +17,13 @@ func ProcsDescribe() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			procs := proc.GetProcesses()
 			if len(args) == 0 {
-				for _, p := range procs {
-					fmt.Print(p.Describe())
+				pids := []int{}
+				for pid := range procs {
+					pids = append(pids, pid)
+				}
+				sort.Slice(pids, func(i, j int) bool { return pids[i] < pids[j] })
+				for _, pid := range pids {
+					fmt.Print(procs[pid].Describe())
 				}
 			} else {
 				for _, a := range args {

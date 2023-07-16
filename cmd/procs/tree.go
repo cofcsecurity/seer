@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func printTree(root_pid int, procs []proc.Process) {
+func printTree(root_pid int, procs map[int]proc.Process) {
 	root_i := -1
 	for i, p := range procs {
 		if p.Pid == root_pid {
@@ -25,18 +25,18 @@ func printTree(root_pid int, procs []proc.Process) {
 	// If a pid is in the map, it has itself been visited
 	visits := make(map[int]int)
 
-	var dfs func(root int, subtree_root int, current proc.Process)
-	dfs = func(root int, subtree_root int, current proc.Process) {
+	var dfs func(root int, subtree_root int, current proc.Process, procs map[int]proc.Process)
+	dfs = func(root int, subtree_root int, current proc.Process, procs map[int]proc.Process) {
 		// Mark vertex as visted
 		visits[current.Pid] = 0
-		if current.Parent != nil {
-			if _, exists := visits[current.Parent.Pid]; exists {
-				visits[current.Parent.Pid] += 1
+		if current.Ppid != 0 {
+			if _, exists := visits[current.Ppid]; exists {
+				visits[current.Ppid] += 1
 			}
 		}
 		// Add edges
 		if !(current.Pid == subtree_root) {
-			parents := current.GetParents()
+			parents := current.GetParents(procs)
 			edges := make([]string, 0)
 			for i := 0; i < len(parents); i++ {
 				if parents[i].Pid == current.Ppid {
@@ -75,16 +75,16 @@ func printTree(root_pid int, procs []proc.Process) {
 		fmt.Printf("[%d] %s %s\n", current.Pid, current.Exelink, current.Cmdline)
 
 		for _, c := range current.Children {
-			dfs(root, current.Pid, *c)
+			dfs(root, current.Pid, procs[c], procs)
 		}
 	}
 
 	if root_pid != 0 {
-		dfs(root_pid, root_pid, procs[root_i])
+		dfs(root_pid, root_pid, procs[root_i], procs)
 	} else {
 		for _, p := range procs {
 			if p.Ppid == root_pid {
-				dfs(p.Pid, p.Pid, p)
+				dfs(p.Pid, p.Pid, p, procs)
 			}
 		}
 	}
