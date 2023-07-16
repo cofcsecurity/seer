@@ -52,9 +52,7 @@ type Process struct {
 
 	User users.User
 
-	// fds/sockets
-	//sockets []Socket // Sockets related to the process
-	//fds []Fd // Open file descriptors
+	Sockets []Socket // Sockets related to the process
 
 	Parent   *Process
 	Children []*Process
@@ -243,15 +241,17 @@ func GetProcesses() []Process {
 		}
 
 		id, _ := strconv.Atoi(ename)
-		proc, _ := getProcess(id)
-		procs = append(procs, proc)
+		p, _ := getProcess(id)
+		procs = append(procs, p)
 	}
 
 	users, _ := users.GetUsers()
+	socks := GetSockets()
 
 	// Go back through the procs and add extra info
 	// point parents <-> children
 	// Resolve user ids to users
+	// Add sockets to procs
 	for i, p := range procs {
 		for j, c := range procs {
 			if p.Pid == c.Ppid {
@@ -264,6 +264,22 @@ func GetProcesses() []Process {
 			if p.Uid == u.Uid {
 				p.User = u
 				break
+			}
+		}
+		fds, err := p.GetFds()
+		if err != nil {
+			fmt.Printf("Error getting Fds for process '%d': %s", p.Pid, err)
+		} else {
+			for _, fd := range fds {
+				if strings.HasPrefix(fd, "socket:") {
+					inode := strings.Split(fd, "socket:[")[1]
+					inode = inode[:len(inode)-1]
+					for _, s := range socks {
+						if fmt.Sprintf("%d", s.Inode) == inode {
+							p.Sockets = append(p.Sockets, s)
+						}
+					}
+				}
 			}
 		}
 		procs[i] = p
