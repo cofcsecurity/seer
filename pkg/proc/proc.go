@@ -52,12 +52,9 @@ type Process struct {
 
 	User users.User
 
-	// fds/sockets
-	//sockets []Socket // Sockets related to the process
-	//fds []Fd // Open file descriptors
+	Sockets []Socket // Sockets related to the process
 
-	Parent   *Process
-	Children []*Process
+	Children []int
 }
 
 // Get the approximate process age in seconds
@@ -105,15 +102,10 @@ func (p Process) Describe() string {
 	desc := "┌[%d] %s\n"
 	desc += "├ cmdline: %s\n"
 	desc += "├ state: %c age: %ds\n"
-	desc += "├ parent: %d (%s)\n"
+	desc += "├ parent: %d\n"
 	desc += "├ user: %s euid: %d\n"
 	desc += "├ exe deleted: %t\n"
 	desc += "└ md5: %s\n"
-
-	parent := "sched"
-	if p.Parent != nil {
-		parent = p.Parent.Exelink
-	}
 
 	return fmt.Sprintf(desc,
 		p.Pid,
@@ -122,7 +114,6 @@ func (p Process) Describe() string {
 		p.State,
 		p.Age(),
 		p.Ppid,
-		parent,
 		p.User.Username,
 		p.Euid,
 		p.Exedel,
@@ -130,12 +121,12 @@ func (p Process) Describe() string {
 	)
 }
 
-func (p Process) GetParents() (parents []Process) {
-	if p.Parent == nil {
+func (p Process) GetParents(procs map[int]Process) (parents []Process) {
+	if p.Ppid == 0 {
 		return
 	} else {
-		parents = append(parents, *p.Parent)
-		parents = append(parents, p.Parent.GetParents()...)
+		parents = append(parents, procs[p.Ppid])
+		parents = append(parents, procs[p.Ppid].GetParents(procs)...)
 	}
 	return
 }
@@ -230,8 +221,8 @@ func getProcess(pid int) (Process, error) {
 	return proc, nil
 }
 
-func GetProcesses() []Process {
-	procs := make([]Process, 0)
+func GetProcesses() map[int]Process {
+	procs := make(map[int]Process)
 	contents, e := os.ReadDir("/proc")
 	if e != nil {
 		log.Print(e.Error())
@@ -243,32 +234,48 @@ func GetProcesses() []Process {
 		}
 
 		id, _ := strconv.Atoi(ename)
-		proc, _ := getProcess(id)
-		procs = append(procs, proc)
+		p, _ := getProcess(id)
+		procs[id] = p
 	}
 
 	users, _ := users.GetUsers()
+	socks := GetSockets()
 
 	// Go back through the procs and add extra info
-	// point parents <-> children
+	// Add child pids
 	// Resolve user ids to users
+	// Add sockets to procs
 	for i, p := range procs {
-		for j, c := range procs {
+		for _, c := range procs {
 			if p.Pid == c.Ppid {
-				p.Children = append(p.Children, &procs[j])
-				c.Parent = &procs[i]
-				procs[j] = c
+				p.Children = append(p.Children, c.Pid)
 			}
 		}
+		sort.Slice(p.Children, func(i, j int) bool { return p.Children[i] < p.Children[j] })
 		for _, u := range users {
 			if p.Uid == u.Uid {
 				p.User = u
 				break
 			}
 		}
+		fds, err := p.GetFds()
+		if err != nil {
+			fmt.Printf("Error getting Fds for process '%d': %s", p.Pid, err)
+		} else {
+			for _, fd := range fds {
+				if strings.HasPrefix(fd, "socket:") {
+					inode := strings.Split(fd, "socket:[")[1]
+					inode = inode[:len(inode)-1]
+					for _, s := range socks {
+						if fmt.Sprintf("%d", s.Inode) == inode {
+							p.Sockets = append(p.Sockets, s)
+						}
+					}
+				}
+			}
+		}
 		procs[i] = p
 	}
 
-	sort.Slice(procs, func(i, j int) bool { return procs[i].Pid < procs[j].Pid })
 	return procs
 }

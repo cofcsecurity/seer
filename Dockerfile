@@ -1,11 +1,11 @@
-FROM golang:latest as builder
+FROM golang:1.20.6-bookworm as builder
 
 COPY . /root/seer/.
 WORKDIR /root/seer
 
 RUN go build -o seer
 
-FROM ubuntu:latest
+FROM debian:bookworm
 
 COPY --from=builder /root/seer/seer /usr/local/bin/seer
 
@@ -16,7 +16,7 @@ RUN seer completion bash > /etc/bash_completion.d/seer
 RUN echo "source /etc/bash_completion" >> /etc/bash.bashrc
 
 # Optional utils
-RUN apt install screen netcat iputils-ping -y
+RUN apt install screen netcat-traditional iputils-ping -y
 
 # Set up test data
 RUN useradd alice && usermod -aG sudo alice

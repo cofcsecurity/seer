@@ -44,10 +44,32 @@ root@system:/# seer proc describe 1
 ┌[1] /usr/bin/bash
 ├ cmdline: /bin/bash
 ├ state: S age: 65s
-├ parent: 0 (sched)
+├ parent: 0
 ├ user: root  euid: 0
 ├ exe deleted: false
 └ md5: 7063c3930affe123baecd3b340f1ad2c
+```
+
+List processes and related sockets:
+```
+root@system:/# seer proc ls --socket 
+┬─[1] /usr/bin/bash (/bin/bash) root 98s
+├┬[11] /usr/bin/nc.traditional (nc-lp42) root 83s
+│└─<0> tcp 0.0.0.0:42 <- 0.0.0.0:0 (LISTEN) i:467275
+├┬[43] /usr/bin/nc.traditional (nc192.168.42.180) root 4s
+│└─<1> tcp 172.17.0.2:59626 -> 192.168.42.1:80 (ESTABLISHED) i:466804
+└─[44] /usr/local/bin/seer (seerprocls--socket) root 0s
+```
+
+Show a process tree:
+```
+root@system:/# seer proc tree 
+┬[1] /usr/bin/bash /bin/bash
+├┬[9] /usr/bin/screen SCREEN-Sx
+│└┬[10] /usr/bin/dash /bin/sh
+│ └┬[11] /usr/bin/bash bash
+│  └─[13] /usr/bin/nc.traditional nc-lp42
+└─[47] /usr/local/bin/seer seerproctree
 ```
 
 Describe the user `alice`

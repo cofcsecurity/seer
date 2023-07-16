@@ -12,6 +12,7 @@ func Socks() *cobra.Command {
 	}
 
 	socks.AddCommand(SocketList())
+	socks.AddCommand(SocketDescribe())
 
 	return socks
 }

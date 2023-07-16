@@ -87,13 +87,41 @@ type Socket struct {
 func (s Socket) String() string {
 	state, _ := strconv.ParseInt(s.State, 16, 0)
 
-	return fmt.Sprintf("[%d] %s %s:%d -> %s:%d (%s) i:%d\n",
+	arrow := "->"
+	if State(state).String() == "LISTEN" {
+		arrow = "<-"
+	}
+
+	return fmt.Sprintf("<%d> %s %s:%d %s %s:%d (%s) i:%d\n",
+		s.Sl,
+		s.Protocol,
+		s.Local_addr, s.Local_port,
+		arrow,
+		s.Remote_addr, s.Remote_port,
+		State(state).String(),
+		s.Inode)
+}
+
+func (s Socket) Describe() string {
+	desc := "┌[%d] (%s)\n"
+	desc += "├ Local: %s:%d\n"
+	desc += "├ Remote: %s:%d\n"
+	desc += "├ State: %s\n"
+	desc += "├ Inode: %d\n"
+	desc += "├ References: %d\n"
+	desc += "└ Location: %d\n"
+
+	state, _ := strconv.ParseInt(s.State, 16, 0)
+
+	return fmt.Sprintf(desc,
 		s.Sl,
 		s.Protocol,
 		s.Local_addr, s.Local_port,
 		s.Remote_addr, s.Remote_port,
 		State(state).String(),
-		s.Inode)
+		s.Inode,
+		s.References,
+		s.Location)
 }
 
 func decodeAddr(hexAddr string) (ip string, port int) {
