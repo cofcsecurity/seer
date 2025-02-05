@@ -1,4 +1,4 @@
-FROM golang:1.20.6-bookworm as builder
+FROM golang:1.23-bookworm as builder
 
 COPY . /root/seer/.
 WORKDIR /root/seer
