@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"seer/pkg/users"
 	"sort"
@@ -61,12 +62,12 @@ type Process struct {
 func (p Process) Age() int {
 	raw_uptime, err := os.ReadFile("/proc/uptime")
 	if err != nil {
-		log.Printf("Failed to read /proc/uptime: %s\n", err)
+		slog.Debug("Failed to read /proc/uptime", "error", err.Error())
 		return -1
 	}
 	uptime, err := strconv.Atoi(strings.Split(string(raw_uptime), ".")[0])
 	if err != nil {
-		log.Printf("Failed to convert uptime to int: %s\n", err)
+		slog.Debug("Failed to convert uptime to int", "error", err.Error())
 		return -1
 	}
 
@@ -271,7 +272,7 @@ func GetProcesses() map[int]Process {
 		}
 		fds, err := p.GetFds()
 		if err != nil {
-			fmt.Printf("Error getting Fds for process '%d': %s", p.Pid, err)
+			slog.Debug("Failed to get process fds", "process", p.Pid, "error", err.Error())
 		} else {
 			for _, fd := range fds {
 				if strings.HasPrefix(fd, "socket:") {

@@ -58,7 +58,7 @@ func ProcsList() *cobra.Command {
 						// Get fds, these are needed in either case
 						fds, e := p.GetFds()
 						if e != nil {
-							fmt.Printf("Failed to get file descriptors: %s\n", e)
+							fmt.Printf("Failed to get file descriptors: %s\n", e.Error())
 							return
 						}
 

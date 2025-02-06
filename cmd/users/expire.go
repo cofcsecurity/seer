@@ -2,7 +2,7 @@ package users
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"regexp"
 
 	"seer/pkg/users"
@@ -22,7 +22,7 @@ func UsersExpire() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			users_map, err := users.GetUsers()
 			if err != nil {
-				log.Printf("Failed to get users: %s\n", err)
+				slog.Error("Failed to get users", "error", err.Error())
 				return
 			}
 			targets := make([]string, 0)
@@ -31,7 +31,7 @@ func UsersExpire() *cobra.Command {
 				for _, p := range args {
 					re, err := regexp.Compile(p)
 					if err != nil {
-						log.Printf("Warning: the pattern '%s' failed to complie. Skipping.\n", p)
+						slog.Warn("Pattern failed to complie. Skipping", "pattern", p)
 						continue
 					}
 					for n, u := range users_map {
@@ -55,7 +55,7 @@ func UsersExpire() *cobra.Command {
 			for _, u := range targets {
 				fmt.Printf("  %s\n", u)
 			}
-			if !utils.Confirm() {
+			if !yes && !utils.Confirm() {
 				fmt.Printf("Canceled.\n")
 				return
 			}
@@ -69,12 +69,12 @@ func UsersExpire() *cobra.Command {
 						err = user.Expire()
 					}
 					if err != nil {
-						log.Printf("Warning: %s\n", err)
+						slog.Error("Failed to (un)expire user", "user", u, "error", err.Error())
 					} else {
 						modified += 1
 					}
 				} else {
-					log.Printf("Warining: The user '%s' does not exist\n", u)
+					slog.Warn("User does not exist", "user", u)
 				}
 			}
 			fmt.Printf("Modified %d user(s).\n", modified)

@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -83,7 +83,7 @@ func GetGPasswords() (map[string]GPassword, error) {
 func GetGroups() (map[string]Group, error) {
 	gpasswds, err := GetGPasswords()
 	if err != nil {
-		log.Printf("Warning: %s\n", err)
+		slog.Debug("Failed to get group passwords", "error", err.Error())
 		gpasswds = make(map[string]GPassword)
 	}
 

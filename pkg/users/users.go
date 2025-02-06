@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strconv"
@@ -85,12 +85,12 @@ func (u User) Describe() string {
 func GetUsers() (map[string]User, error) {
 	passwords, err := GetPasswords()
 	if err != nil {
-		log.Printf("Warning: %s\n", err)
+		slog.Debug("Failed to get passwords", "error", err.Error())
 		passwords = map[string]Password{}
 	}
 	groups, err := GetGroups()
 	if err != nil {
-		log.Printf("Warning: %s\n", err)
+		slog.Debug("Failed to get groups", "error", err.Error())
 		groups = map[string]Group{}
 	}
 	groups_map := make(map[string][]Group)

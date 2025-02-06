@@ -2,7 +2,7 @@ package users
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"regexp"
 	"seer/pkg/users"
 
@@ -20,9 +20,9 @@ Optionally use regex or inverse regex matching to filter users.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			users_map, err := users.GetUsers()
 			if err != nil {
-				log.Printf("%s\n", err)
+				slog.Error("Failed to get users", "error", err.Error())
 			}
-			if len(args) == 0 && cmd.Flags().NFlag() == 0 {
+			if len(args) == 0 {
 				for _, u := range users_map {
 					fmt.Print(u.Describe())
 				}
@@ -38,7 +38,7 @@ Optionally use regex or inverse regex matching to filter users.`,
 				for _, p := range args {
 					re, err := regexp.Compile(p)
 					if err != nil {
-						log.Printf("Warning: the pattern '%s' failed to complie. Skipping.\n", p)
+						slog.Warn("Failed to compile pattern. Skipping", "pattern", p)
 						continue
 					}
 					for n, u := range users_map {
@@ -57,7 +57,7 @@ Optionally use regex or inverse regex matching to filter users.`,
 					if exists {
 						fmt.Print(user.Describe())
 					} else {
-						log.Printf("The user '%s' does not exist", u)
+						slog.Warn("User does not exist", "user", u)
 					}
 				}
 			}

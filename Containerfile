@@ -19,7 +19,7 @@ RUN echo "source /etc/bash_completion" >> /etc/bash.bashrc
 RUN apt install screen netcat-traditional iputils-ping -y
 
 # Set up test data
-RUN useradd alice && usermod -aG sudo alice
-RUN useradd bob
+RUN useradd alice -s /bin/bash && usermod -aG sudo alice
+RUN useradd bob -s /bin/bash
 
 ENTRYPOINT [ "/bin/bash" ]
