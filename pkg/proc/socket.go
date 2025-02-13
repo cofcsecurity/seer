@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -148,7 +148,7 @@ func GetSockets() (sockets []Socket) {
 		path := fmt.Sprintf("/proc/net/%s", proto)
 		contents, err := os.ReadFile(path)
 		if err != nil {
-			log.Printf("Warning: Failed to read %s\n", path)
+			slog.Debug("Failed to read file", "path", path, "error", err.Error())
 			continue
 		}
 		for n, line := range strings.Split(string(contents), "\n") {

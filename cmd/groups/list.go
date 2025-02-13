@@ -16,7 +16,7 @@ func GroupList() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			groups_map, err := users.GetGroups()
 			if err != nil {
-				fmt.Printf("%s\n", err)
+				fmt.Printf("%s\n", err.Error())
 			}
 			groups := make([]users.Group, 0)
 			for _, g := range groups_map {

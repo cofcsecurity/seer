@@ -16,7 +16,7 @@ func UsersList() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			users_map, err := users.GetUsers()
 			if err != nil {
-				fmt.Printf("%s\n", err)
+				fmt.Printf("%s\n", err.Error())
 			}
 			users := make([]users.User, 0)
 			for _, u := range users_map {
