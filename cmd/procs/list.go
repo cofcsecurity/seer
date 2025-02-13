@@ -31,8 +31,27 @@ func groupByExe(procs map[int]proc.Process) {
 	}
 }
 
+func groupByUser(procs map[int]proc.Process) {
+	userProcs := make(map[string][]proc.Process)
+	for _, p := range procs {
+		user := p.User.Username
+		userProcs[user] = append(userProcs[user], p)
+	}
+	for u := range userProcs {
+		fmt.Printf("┌<%s> (Count: %d)\n", u, len(userProcs[u]))
+		for i, p := range userProcs[u] {
+			line := '├'
+			if i == len(userProcs[u])-1 {
+				line = '└'
+			}
+			fmt.Printf("%c[%d]->[%d] %s started %d seconds ago by %s\n", line, p.Ppid, p.Pid, p.Cmdline, p.Age(), p.User.Username)
+		}
+	}
+}
+
 func ProcsList() *cobra.Command {
 	var byExe bool
+	var byUser bool
 	var lsFds bool
 	var lsSockets bool
 
@@ -50,6 +69,8 @@ func ProcsList() *cobra.Command {
 
 			if byExe {
 				groupByExe(procs)
+			} else if byUser {
+				groupByUser(procs)
 			} else {
 				i := 0
 				for _, pid := range pids {
@@ -116,6 +137,7 @@ func ProcsList() *cobra.Command {
 	}
 
 	list.Flags().BoolVarP(&byExe, "exe", "e", false, "group processes by executable")
+	list.Flags().BoolVarP(&byUser, "user", "u", false, "group processes by user")
 	list.Flags().BoolVarP(&lsFds, "fd", "f", false, "list the file descriptors related to each process")
 	list.Flags().BoolVarP(&lsSockets, "socket", "s", false, "list the sockets related to each process")
 	list.MarkFlagsMutuallyExclusive("exe", "fd", "socket")
