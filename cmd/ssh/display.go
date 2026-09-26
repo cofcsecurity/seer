@@ -29,3 +29,10 @@ func sessionOutput(s ssh.Session, detail, color bool) string {
 	}
 	return line
 }
+
+func warningOutput(message string, color bool) string {
+	if color {
+		return "\x1b[1;31m" + message + "\x1b[0m"
+	}
+	return message
+}

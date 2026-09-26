@@ -54,11 +54,13 @@ func SessionEnd() *cobra.Command {
 func confirmSessionEnd(cmd *cobra.Command, target ssh.Session, foundCurrent, yes bool) (bool, bool) {
 	currentRisk := target.Current || (os.Getenv("SSH_CONNECTION") != "" && !foundCurrent)
 	if currentRisk {
+		var warning string
 		if target.Current {
-			fmt.Fprintln(cmd.OutOrStdout(), "WARNING: This is your current SSH connection. Ending it will disconnect this terminal.")
+			warning = "WARNING: This is your current SSH connection. Ending it will disconnect this terminal."
 		} else {
-			fmt.Fprintln(cmd.OutOrStdout(), "WARNING: Your current SSH connection could not be identified. This may be your own connection.")
+			warning = "WARNING: Your current SSH connection could not be identified. This may be your own connection."
 		}
+		fmt.Fprintln(cmd.OutOrStdout(), warningOutput(warning, terminalColor(cmd.OutOrStdout())))
 		fmt.Fprintln(cmd.OutOrStdout(), "--yes does not skip confirmation for a possible current connection.")
 		return confirmCurrentEnd(cmd.InOrStdin(), cmd.OutOrStdout()), true
 	}

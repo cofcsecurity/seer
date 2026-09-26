@@ -22,7 +22,7 @@ func History() *cobra.Command {
 			return nil
 		},
 	}
-	history.Flags().BoolVar(&failed, "failed", false, "show failed login records where available")
+	history.Flags().BoolVar(&failed, "failed", false, "show failed SSH authentication events and bad system login records")
 	history.Flags().IntVarP(&limit, "limit", "n", 20, "maximum records from each source (1-500)")
 	return history
 }

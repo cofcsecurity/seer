@@ -63,3 +63,8 @@ func EndSession(id string, currentConfirmed bool) error {
 	// verify its start time and socket inode before sending SIGTERM.
 	return signalVerifiedSession(*target)
 }
+
+func sameKillableTransport(target, current Session) bool {
+	return current.ID == target.ID && current.Local == target.Local && current.Remote == target.Remote &&
+		current.Direction == "inbound" && current.ListenerMatch && current.SharedOwners == 1
+}

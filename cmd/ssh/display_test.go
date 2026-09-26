@@ -21,3 +21,13 @@ func TestCurrentSessionColorKeepsTextMarker(t *testing.T) {
 		t.Fatalf("other session was colored: %q", got)
 	}
 }
+
+func TestWarningColorFallsBackToPlainText(t *testing.T) {
+	const warning = "WARNING: This is your current SSH connection."
+	if got := warningOutput(warning, false); got != warning {
+		t.Fatalf("unexpected plain warning: %q", got)
+	}
+	if got := warningOutput(warning, true); got != "\x1b[1;31m"+warning+"\x1b[0m" {
+		t.Fatalf("unexpected red warning: %q", got)
+	}
+}

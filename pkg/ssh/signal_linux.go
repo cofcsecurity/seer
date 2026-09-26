@@ -30,7 +30,7 @@ func signalVerifiedSession(target Session) error {
 	}
 	found := false
 	for _, session := range current {
-		if session.ID == target.ID && session.Local == target.Local && session.Remote == target.Remote {
+		if sameKillableTransport(target, session) {
 			found = true
 			break
 		}

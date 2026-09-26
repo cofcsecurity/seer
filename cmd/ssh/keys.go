@@ -29,6 +29,8 @@ func Keys() *cobra.Command {
 			return nil
 		},
 	}
+	var describePath string
+	var describeLine int
 	describe := &cobra.Command{
 		Use: "describe [fingerprint]", Short: "Describe an authorized key",
 		Args: cobra.ExactArgs(1),
@@ -37,15 +39,19 @@ func Keys() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			matches := matchingKeys(found, args[0])
+			matches := matchingKeys(found, args[0], describePath, describeLine)
 			if len(matches) != 1 {
-				return fmt.Errorf("expected one key with that fingerprint, found %d; use --user to narrow it", len(matches))
+				return fmt.Errorf("expected one key with that fingerprint, found %d; use --user, --path, and --line to narrow it", len(matches))
 			}
 			fmt.Print(matches[0].Describe())
 			return nil
 		},
 	}
+	describe.Flags().StringVar(&describePath, "path", "", "authorized_keys file containing the key")
+	describe.Flags().IntVar(&describeLine, "line", 0, "line number of the key")
 	var yes, allowCurrentAccess bool
+	var removePath string
+	var removeLine int
 	remove := &cobra.Command{
 		Use: "remove [fingerprint]", Short: "Remove one authorized key",
 		Args: cobra.ExactArgs(1),
@@ -54,9 +60,9 @@ func Keys() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			matches := matchingKeys(found, args[0])
+			matches := matchingKeys(found, args[0], removePath, removeLine)
 			if len(matches) != 1 {
-				return fmt.Errorf("expected one key with that fingerprint, found %d; use --user to narrow it", len(matches))
+				return fmt.Errorf("expected one key with that fingerprint, found %d; use --user, --path, and --line to narrow it", len(matches))
 			}
 			fmt.Print(matches[0].Describe())
 			if !allowCurrentAccess {
@@ -95,14 +101,17 @@ func Keys() *cobra.Command {
 	}
 	remove.Flags().BoolVarP(&yes, "yes", "y", false, "respond to confirmation with yes")
 	remove.Flags().BoolVar(&allowCurrentAccess, "allow-current-access", false, "allow removing a key for the current SSH account")
+	remove.Flags().StringVar(&removePath, "path", "", "authorized_keys file containing the key")
+	remove.Flags().IntVar(&removeLine, "line", 0, "line number of the key")
 	keys.AddCommand(list, describe, remove)
 	return keys
 }
 
-func matchingKeys(keys []ssh.AuthorizedKey, fingerprint string) []ssh.AuthorizedKey {
+func matchingKeys(keys []ssh.AuthorizedKey, fingerprint, path string, line int) []ssh.AuthorizedKey {
 	var result []ssh.AuthorizedKey
 	for _, key := range keys {
-		if "SHA256:"+key.Fingerprint == fingerprint || key.Fingerprint == fingerprint {
+		if ("SHA256:"+key.Fingerprint == fingerprint || key.Fingerprint == fingerprint) &&
+			(path == "" || key.Path == path) && (line == 0 || key.Line == line) {
 			result = append(result, key)
 		}
 	}

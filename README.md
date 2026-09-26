@@ -104,6 +104,9 @@ for the most complete process and socket visibility. In an interactive terminal,
 the current connection is highlighted in yellow. The text marker remains when
 color is disabled or output is redirected.
 
+See [SSH command family](docs/ssh-architecture.md) for the data sources,
+connection checks, and action safeguards behind these commands.
+
 List and describe SSH connections:
 ```
 root@system:/# seer ssh list
@@ -186,22 +189,28 @@ Confirm again to end this SSH connection? (yes/no): no
 Canceled.
 ```
 
+![Example SSH end warning highlighted in red](docs/ssh-current-warning.svg)
+
 Ending your own connection requires `yes` at both prompts, even with `--yes`.
-Answering `no` at either prompt cancels the action. Ending an SSH connection
-requires Linux amd64 or arm64 with pidfd support.
+Answering `no` at either prompt cancels the action. The warning appears red in
+an interactive terminal and stays plain text when color is unavailable. Ending
+an SSH connection requires Linux amd64 or arm64 with pidfd support.
 
 List SSH server rules and check effective settings for `alice`:
 ```
 root@system:/# seer ssh config list
+/etc/ssh/sshd_config:8 PubkeyAuthentication yes
+/etc/ssh/sshd_config:9 AuthorizedKeysFile .ssh/authorized_keys
 /etc/ssh/sshd_config:12 Include /etc/ssh/sshd_config.d/*.conf
 /etc/ssh/sshd_config.d/50-site.conf:3 PermitRootLogin no
 /etc/ssh/sshd_config.d/50-site.conf:4 PasswordAuthentication yes
+/etc/ssh/sshd_config.d/50-site.conf:8 Match User alice Address 192.0.2.*
+/etc/ssh/sshd_config.d/50-site.conf:9 PasswordAuthentication no
 root@system:/# seer ssh config check --user alice --addr 192.0.2.10
 SSH configuration syntax: valid
-review: passwordauthentication=yes: password login is enabled; confirm this is intended
 ... additional effective settings omitted ...
 allowtcpforwarding no
-passwordauthentication yes
+passwordauthentication no
 permitrootlogin no
 ```
 
@@ -216,6 +225,7 @@ List and describe authorized keys for `bob`:
 ```
 root@system:/# seer ssh keys list --user bob
 bob SHA256:jsbmXD9MxXonCbWzUj0vT8eXuAITY03X2W1s5fjse/Y ssh-ed25519 /home/bob/.ssh/authorized_keys:2 bob@laptop
+bob SHA256:V1Q9DCu5TjXcqpw9jOUpBFoJdrQXzwuy9+U55GfCEKU ssh-ed25519 /home/bob/.ssh/authorized_keys:5 bob@desktop
 root@system:/# seer ssh keys describe SHA256:jsbmXD9MxXonCbWzUj0vT8eXuAITY03X2W1s5fjse/Y --user bob
 ┌ bob SHA256:jsbmXD9MxXonCbWzUj0vT8eXuAITY03X2W1s5fjse/Y
 ├ Type: ssh-ed25519
@@ -237,22 +247,31 @@ Backup: /home/bob/.ssh/.seer-keys-backup-abc123
 Removed one authorized key entry.
 ```
 
+If a fingerprint occurs more than once, use `--path` and `--line` from the
+key list to select one entry for `keys describe` or `keys remove`.
+
 The key commands use NSS accounts where `getent` is available and consult
 `sshd -T` for authorized key file paths. When that is unavailable, they check
 standard files in each home directory and print a warning. A removal saves a
-backup in the same directory and preserves the other entries. If the key
+backup in the same directory and preserves the other entries. Removal requires
+the effective `sshd` configuration to be available. If the key
 belongs to the current SSH account, removal requires
 `--allow-current-access`.
 
-Show login records and SSH daemon events:
+Show SSH daemon events and system login records:
 ```
 root@system:/# seer ssh history --limit 30
 SSH daemon journal entries (all types):
 2026-09-25T13:42:08+0000 system sshd[2417]: Accepted publickey for bob from 192.0.2.11 port 50218 ssh2
 root@system:/# seer ssh history --failed --limit 30
+SSH daemon journal entries (failed authentication):
+2026-09-25T13:40:02+0000 system sshd[2501]: Failed password for invalid user guest from 192.0.2.12 port 51000 ssh2
 System login records (btmp; not SSH-specific):
-bob      ssh:notty    192.0.2.11      Fri Sep 25 13:40 - 13:40  (00:00)
+guest    ssh:notty    192.0.2.12      Fri Sep 25 13:40 - 13:40  (00:00)
 ```
 
-`--failed` selects failed system login records. Login records are not
-SSH-specific and do not establish whether a connection is still active.
+`--failed` selects common failed authentication messages from SSH daemon
+journal and text logs, plus failed system login records when available. Log
+sources vary by distro and may repeat an event. System `wtmp` and `btmp`
+records are not SSH-specific and do not establish whether a connection is
+still active.

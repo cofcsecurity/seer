@@ -3,6 +3,7 @@ package ssh
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"os"
@@ -101,26 +102,71 @@ func keyType(value string) bool {
 		strings.HasSuffix(value, "-cert-v01@openssh.com")
 }
 
-func parseKey(line string, account Account, path string, number int) (AuthorizedKey, bool) {
-	fields := strings.Fields(line)
-	for i := 0; i+1 < len(fields); i++ {
-		if !keyType(fields[i]) {
-			continue
-		}
-		blob, err := base64.StdEncoding.DecodeString(fields[i+1])
-		if err != nil || len(blob) == 0 {
-			continue
-		}
-		sum := sha256.Sum256(blob)
-		key := AuthorizedKey{
-			User: account.Name, Path: path, Line: number, Type: fields[i],
-			Fingerprint: base64.RawStdEncoding.EncodeToString(sum[:]),
-			Options:     strings.Join(fields[:i], " "),
-			Comment:     strings.Join(fields[i+2:], " "), content: line,
-		}
-		return key, true
+func authorizedKeyToken(value string) (string, string, bool) {
+	value = strings.TrimLeft(value, " \t")
+	if value == "" {
+		return "", "", false
 	}
-	return AuthorizedKey{}, false
+	quoted, escaped := false, false
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '\\':
+			if quoted && !escaped {
+				escaped = true
+				continue
+			}
+		case '"':
+			if !escaped {
+				quoted = !quoted
+			}
+		case ' ', '\t':
+			if !quoted {
+				return value[:i], strings.TrimLeft(value[i:], " \t"), true
+			}
+		}
+		escaped = false
+	}
+	return value, "", !quoted
+}
+
+func parseKey(line string, account Account, path string, number int) (AuthorizedKey, bool) {
+	value := strings.TrimSpace(line)
+	if value == "" || strings.HasPrefix(value, "#") {
+		return AuthorizedKey{}, false
+	}
+	first, rest, ok := authorizedKeyToken(value)
+	if !ok {
+		return AuthorizedKey{}, false
+	}
+	options, kind := "", first
+	if !keyType(kind) {
+		options = first
+		kind, rest, ok = authorizedKeyToken(rest)
+		if !ok || !keyType(kind) {
+			return AuthorizedKey{}, false
+		}
+	}
+	encoded, comment, ok := authorizedKeyToken(rest)
+	if !ok {
+		return AuthorizedKey{}, false
+	}
+	blob, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		blob, err = base64.RawStdEncoding.DecodeString(encoded)
+	}
+	if err != nil || len(blob) < 4 {
+		return AuthorizedKey{}, false
+	}
+	nameLength := binary.BigEndian.Uint32(blob[:4])
+	if nameLength == 0 || nameLength > uint32(len(blob)-4) || string(blob[4:4+nameLength]) != kind {
+		return AuthorizedKey{}, false
+	}
+	sum := sha256.Sum256(blob)
+	return AuthorizedKey{
+		User: account.Name, Path: path, Line: number, Type: kind,
+		Fingerprint: base64.RawStdEncoding.EncodeToString(sum[:]),
+		Options:     options, Comment: strings.TrimSpace(comment), content: line,
+	}, true
 }
 
 func keysInFile(path string, account Account) ([]AuthorizedKey, error) {
@@ -179,6 +225,13 @@ func ListKeys(username, configPath, clientAddr string) ([]AuthorizedKey, error) 
 // RemoveKey removes one exact authorized_keys entry after rechecking its
 // fingerprint, line, and content. It returns a secured backup path.
 func RemoveKey(expected AuthorizedKey, configPath, clientAddr string) (string, error) {
+	effective, err := EffectiveConfig(configPath, map[string]string{"user": expected.User, "addr": clientAddr})
+	if err != nil {
+		return "", fmt.Errorf("cannot verify authorized key paths for removal: %w", err)
+	}
+	if _, ok := effective["authorizedkeysfile"]; !ok {
+		return "", fmt.Errorf("cannot verify authorized key paths for removal: sshd did not report AuthorizedKeysFile")
+	}
 	keys, err := ListKeys(expected.User, configPath, clientAddr)
 	if err != nil {
 		return "", err

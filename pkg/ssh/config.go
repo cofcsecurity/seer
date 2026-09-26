@@ -63,13 +63,17 @@ func readConfigRules(path string, seen map[string]bool) ([]ConfigRule, error) {
 			if !filepath.IsAbs(pattern) {
 				pattern = filepath.Join("/etc/ssh", pattern)
 			}
-			matches, _ := filepath.Glob(pattern)
+			matches, err := filepath.Glob(pattern)
+			if err != nil {
+				return nil, fmt.Errorf("%s:%d: invalid Include pattern %q: %w", abs, line, pattern, err)
+			}
 			sort.Strings(matches)
 			for _, match := range matches {
 				included, err := readConfigRules(match, seen)
-				if err == nil {
-					rules = append(rules, included...)
+				if err != nil {
+					return nil, fmt.Errorf("%s:%d: could not read Include %q: %w", abs, line, match, err)
 				}
+				rules = append(rules, included...)
 			}
 		}
 	}
