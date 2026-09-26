@@ -5,6 +5,7 @@ import (
 	"seer/cmd/groups"
 	"seer/cmd/procs"
 	"seer/cmd/socks"
+	"seer/cmd/ssh"
 	"seer/cmd/users"
 
 	"log/slog"
@@ -33,6 +34,7 @@ func main() {
 	root.AddCommand(groups.Groups())
 	root.AddCommand(procs.Procs())
 	root.AddCommand(socks.Socks())
+	root.AddCommand(ssh.SSH())
 
 	root.PersistentFlags().BoolVarP(&verboseLogging, "verbose", "v", false, "enable verbose logging")
 

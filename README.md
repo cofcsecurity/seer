@@ -93,3 +93,166 @@ The following 2 user(s) will be modified:
 Continue? (yes/no): yes
 Modified 2 user(s).
 ```
+
+### SSH inspection and administration
+
+On Linux, `seer ssh list` shows live SSH-owned TCP connections using `/proc`
+socket and process information. An established connection is listed even if it
+has no terminal or login record. `CURRENT SESSION` identifies the invoking
+connection when process ancestry or `SSH_CONNECTION` matches it. Run as root
+for the most complete process and socket visibility. In an interactive terminal,
+the current connection is highlighted in yellow. The text marker remains when
+color is disabled or output is redirected.
+
+List and describe SSH connections:
+```
+root@system:/# seer ssh list
+[1832:567890:41852:9f62a3b0178a4c20] inbound 192.0.2.10:52644 -> 192.0.2.20:22 alice pid:1832 authenticated [CURRENT SESSION]
+[2417:568301:41998:641a63b779024ffd] inbound 192.0.2.11:50218 -> 192.0.2.20:22 bob pid:2417 authenticated
+root@system:/# seer ssh describe 2417:568301:41998:641a63b779024ffd
+┌ 2417:568301:41998:641a63b779024ffd (inbound)
+├ Remote: 192.0.2.11:50218
+├ Local: 192.0.2.20:22
+├ Login user: bob
+├ Process user: root
+├ Login time: 2026-09-25 13:42
+├ PID: 2417 (start ticks: 568301)
+├ Network namespace: net:[4026531840]
+├ Socket inode: 41998
+├ Socket owners: 1
+├ Command: sshd: bob [priv]
+├ Authenticated: true
+├ SSH listener matched: true
+├ Current session: false
+└ Sources: TCP socket, /proc/PID/fd, /proc/PID/stat, child SSH_CONNECTION, sshd listening socket, utmp (who)
+```
+
+![Example SSH list output with the current connection highlighted in yellow](docs/ssh-current-session.svg)
+
+Seer builds the bracketed session ID from the process ID, its start time, the
+socket inode, and a hash of the network namespace and connection addresses.
+Linux supplies these values through `/proc`; SSH does not assign this ID.
+Seer uses them to check that an ID still refers to the same process and socket
+before ending a connection. Copy a fresh ID from `ssh list` before acting.
+
+End an SSH connection using an ID from `ssh list`:
+```
+root@system:/# seer ssh end 2417:568301:41998:641a63b779024ffd
+┌ 2417:568301:41998:641a63b779024ffd (inbound)
+├ Remote: 192.0.2.11:50218
+├ Local: 192.0.2.20:22
+├ Login user: bob
+├ Process user: root
+├ Login time: 2026-09-25 13:42
+├ PID: 2417 (start ticks: 568301)
+├ Network namespace: net:[4026531840]
+├ Socket inode: 41998
+├ Socket owners: 1
+├ Command: sshd: bob [priv]
+├ Authenticated: true
+├ SSH listener matched: true
+├ Current session: false
+└ Sources: TCP socket, /proc/PID/fd, /proc/PID/stat, child SSH_CONNECTION, sshd listening socket, utmp (who)
+Continue? (yes/no): yes
+SIGTERM sent to SSH connection process.
+```
+
+`ssh end` sends SIGTERM only after it rechecks the process and socket. It
+requires a matching SSH listener and one process owner for the socket.
+
+Attempt to end your own SSH connection:
+
+```
+root@system:/# seer ssh end 1832:567890:41852:9f62a3b0178a4c20 --yes
+┌ 1832:567890:41852:9f62a3b0178a4c20 (inbound)
+├ Remote: 192.0.2.10:52644
+├ Local: 192.0.2.20:22
+├ Login user: alice
+├ Process user: root
+├ Login time: 2026-09-25 13:40
+├ PID: 1832 (start ticks: 567890)
+├ Network namespace: net:[4026531840]
+├ Socket inode: 41852
+├ Socket owners: 1
+├ Command: sshd: alice [priv]
+├ Authenticated: true
+├ SSH listener matched: true
+├ Current session: true
+└ Sources: TCP socket, /proc/PID/fd, /proc/PID/stat, child SSH_CONNECTION, sshd listening socket, current process ancestry or SSH_CONNECTION, utmp (who)
+WARNING: This is your current SSH connection. Ending it will disconnect this terminal.
+--yes does not skip confirmation for a possible current connection.
+End this possible current connection? (yes/no): yes
+Confirm again to end this SSH connection? (yes/no): no
+Canceled.
+```
+
+Ending your own connection requires `yes` at both prompts, even with `--yes`.
+Answering `no` at either prompt cancels the action. Ending an SSH connection
+requires Linux amd64 or arm64 with pidfd support.
+
+List SSH server rules and check effective settings for `alice`:
+```
+root@system:/# seer ssh config list
+/etc/ssh/sshd_config:12 Include /etc/ssh/sshd_config.d/*.conf
+/etc/ssh/sshd_config.d/50-site.conf:3 PermitRootLogin no
+/etc/ssh/sshd_config.d/50-site.conf:4 PasswordAuthentication yes
+root@system:/# seer ssh config check --user alice --addr 192.0.2.10
+SSH configuration syntax: valid
+review: passwordauthentication=yes: password login is enabled; confirm this is intended
+... additional effective settings omitted ...
+allowtcpforwarding no
+passwordauthentication yes
+permitrootlogin no
+```
+
+The effective settings output is shortened here.
+
+`config check` runs `sshd -t` and `sshd -T`. Its findings are review prompts;
+the right SSH policy depends on the host. Use `--file` for a nonstandard
+server configuration file. Supply `--user` and `--addr` to check `Match` rules;
+`--host`, `--laddr`, and `--lport` are available when needed.
+
+List and describe authorized keys for `bob`:
+```
+root@system:/# seer ssh keys list --user bob
+bob SHA256:jsbmXD9MxXonCbWzUj0vT8eXuAITY03X2W1s5fjse/Y ssh-ed25519 /home/bob/.ssh/authorized_keys:2 bob@laptop
+root@system:/# seer ssh keys describe SHA256:jsbmXD9MxXonCbWzUj0vT8eXuAITY03X2W1s5fjse/Y --user bob
+┌ bob SHA256:jsbmXD9MxXonCbWzUj0vT8eXuAITY03X2W1s5fjse/Y
+├ Type: ssh-ed25519
+├ File: /home/bob/.ssh/authorized_keys:2
+├ Options:
+└ Comment: bob@laptop
+```
+
+Remove one authorized key using a fingerprint from the list:
+```
+root@system:/# seer ssh keys remove SHA256:jsbmXD9MxXonCbWzUj0vT8eXuAITY03X2W1s5fjse/Y --user bob
+┌ bob SHA256:jsbmXD9MxXonCbWzUj0vT8eXuAITY03X2W1s5fjse/Y
+├ Type: ssh-ed25519
+├ File: /home/bob/.ssh/authorized_keys:2
+├ Options:
+└ Comment: bob@laptop
+Continue? (yes/no): yes
+Backup: /home/bob/.ssh/.seer-keys-backup-abc123
+Removed one authorized key entry.
+```
+
+The key commands use NSS accounts where `getent` is available and consult
+`sshd -T` for authorized key file paths. When that is unavailable, they check
+standard files in each home directory and print a warning. A removal saves a
+backup in the same directory and preserves the other entries. If the key
+belongs to the current SSH account, removal requires
+`--allow-current-access`.
+
+Show login records and SSH daemon events:
+```
+root@system:/# seer ssh history --limit 30
+SSH daemon journal entries (all types):
+2026-09-25T13:42:08+0000 system sshd[2417]: Accepted publickey for bob from 192.0.2.11 port 50218 ssh2
+root@system:/# seer ssh history --failed --limit 30
+System login records (btmp; not SSH-specific):
+bob      ssh:notty    192.0.2.11      Fri Sep 25 13:40 - 13:40  (00:00)
+```
+
+`--failed` selects failed system login records. Login records are not
+SSH-specific and do not establish whether a connection is still active.
