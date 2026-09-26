@@ -20,10 +20,22 @@ To generate an autocompletion script for your terminal use the `seer completion`
 The following commands can be used to configure bash autocompletion:
 ```
 apt update && apt install bash-completion -y
-mkdir /etc/bash_completion.d/
+mkdir -p /etc/bash_completion.d/
 seer completion bash > /etc/bash_completion.d/seer
-echo "source /etc/bash_completion" >> /etc/bash.bashrc
+source /usr/share/bash-completion/bash_completion
+source /etc/bash_completion.d/seer
 ```
+
+Load `bash_completion` before the Seer script in each Bash session that was
+already open when the package was installed. It defines
+`_get_comp_words_by_ref`, which the generated Seer script uses. New
+interactive Bash sessions normally load it automatically. If Tab completion
+reports `_get_comp_words_by_ref: command not found`, run the two `source`
+commands above in that session. After updating Seer, install the new binary
+before testing completion. `seer ssh -h` should show the SSH commands in that
+binary. With completion active, `seer ssh describe` and `seer ssh end`
+suggest visible session IDs. The `seer ssh keys describe` and
+`seer ssh keys remove` commands suggest visible key fingerprints.
 
 For other shells see `seer completion -h`
 
@@ -99,7 +111,8 @@ Modified 2 user(s).
 On Linux, `seer ssh list` shows live SSH-owned TCP connections using `/proc`
 socket and process information. An established connection is listed even if it
 has no terminal or login record. `CURRENT SESSION` identifies the invoking
-connection when process ancestry or `SSH_CONNECTION` matches it. Run as root
+connection from `SSH_CONNECTION`, or from process ancestry when that value is
+absent. Run as root
 for the most complete process and socket visibility. In an interactive terminal,
 the current connection is highlighted in yellow. The text marker remains when
 color is disabled or output is redirected.
@@ -156,12 +169,17 @@ root@system:/# seer ssh end 2417:568301:41998:641a63b779024ffd
 ├ SSH listener matched: true
 ├ Current session: false
 └ Sources: TCP socket, /proc/PID/fd, /proc/PID/stat, child SSH_CONNECTION, sshd listening socket, utmp (who)
+Ending this SSH connection may disconnect multiple sessions or forwards.
 Continue? (yes/no): yes
-SIGTERM sent to SSH connection process.
+SSH connection close requested.
 ```
 
-`ssh end` sends SIGTERM only after it rechecks the process and socket. It
-requires a matching SSH listener and one process owner for the socket.
+`ssh end` rechecks the process and socket before acting. On supported Linux
+kernels it shuts down the selected socket, including when two SSH processes
+hold it. If socket access is unavailable, it can send SIGTERM to a single
+verified owner that does not also own a listener or another established TCP
+connection. An SSH listener is
+not required for a server launched by `inetd`.
 
 Attempt to end your own SSH connection:
 
@@ -182,6 +200,7 @@ root@system:/# seer ssh end 1832:567890:41852:9f62a3b0178a4c20 --yes
 ├ SSH listener matched: true
 ├ Current session: true
 └ Sources: TCP socket, /proc/PID/fd, /proc/PID/stat, child SSH_CONNECTION, sshd listening socket, current process ancestry or SSH_CONNECTION, utmp (who)
+Ending this SSH connection may disconnect multiple sessions or forwards.
 WARNING: This is your current SSH connection. Ending it will disconnect this terminal.
 --yes does not skip confirmation for a possible current connection.
 End this possible current connection? (yes/no): yes
@@ -212,6 +231,9 @@ SSH configuration syntax: valid
 allowtcpforwarding no
 passwordauthentication no
 permitrootlogin no
+Running sshd PID 820 (listener): /usr/sbin/sshd -D
+  Listening: 0.0.0.0:22
+Note: effective settings above read the file on disk; a running daemon may have loaded earlier contents.
 ```
 
 The effective settings output is shortened here.
@@ -220,6 +242,8 @@ The effective settings output is shortened here.
 the right SSH policy depends on the host. Use `--file` for a nonstandard
 server configuration file. Supply `--user` and `--addr` to check `Match` rules;
 `--host`, `--laddr`, and `--lport` are available when needed.
+The runtime lines show visible SSH listener processes and their command-line
+overrides. They do not prove that the daemon has reloaded the file on disk.
 
 List and describe authorized keys for `bob`:
 ```
@@ -256,7 +280,26 @@ standard files in each home directory and print a warning. A removal saves a
 backup in the same directory and preserves the other entries. Removal requires
 the effective `sshd` configuration to be available. If the key
 belongs to the current SSH account, removal requires
-`--allow-current-access`.
+`--allow-current-access`. The same override is required if the command is
+running inside SSH or has an incomplete connection scan and cannot identify
+the current login.
+
+Show other SSH authentication sources for one account:
+```
+root@system:/# seer ssh keys sources --user bob
+Authentication sources for bob:
+AuthorizedKeysFile: /home/bob/.ssh/authorized_keys
+AuthorizedKeysCommand: /usr/local/bin/key-lookup %u (user: nobody; external keys not enumerated)
+TrustedUserCAKeys: /etc/ssh/user_ca_keys.pub
+  CA: SHA256:7vxZcXuZmxo7PQnZj7vJxZiGlyIwcRHDf8mmAyifHpA
+AuthorizedPrincipalsFile: /home/bob/.ssh/authorized_principals
+  Principal: bob
+HostKey: /etc/ssh/ssh_host_ed25519_key mode:0600 SHA256:lxiZarNPnMxOtyhAdUEHI36yfPoDaSZ3jNUzQWgxypo
+StrictModes: yes
+```
+
+`keys sources` reads file-based CA keys, principal entries, and public host-key
+fingerprints. It reports external lookup commands without running them.
 
 Show SSH daemon events and system login records:
 ```
@@ -272,6 +315,7 @@ guest    ssh:notty    192.0.2.12      Fri Sep 25 13:40 - 13:40  (00:00)
 
 `--failed` selects common failed authentication messages from SSH daemon
 journal and text logs, plus failed system login records when available. Log
-sources vary by distro and may repeat an event. System `wtmp` and `btmp`
+sources vary by distro. Seer also reads numbered and gzip-compressed log
+rotations and suppresses matching journal/text duplicates. System `wtmp` and `btmp`
 records are not SSH-specific and do not establish whether a connection is
 still active.

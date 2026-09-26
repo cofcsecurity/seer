@@ -2,11 +2,42 @@ package ssh
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestSSHProcessRecognizesReplacedExecutable(t *testing.T) {
+	for _, test := range []struct {
+		exe  string
+		want string
+	}{
+		{"/usr/sbin/sshd (deleted)", "inbound"},
+		{"/usr/lib/openssh/sshd-session (deleted)", "inbound"},
+		{"/usr/lib/openssh/sshd-auth", "inbound"},
+		{"/usr/bin/ssh (deleted)", "outbound"},
+		{"/tmp/fake-sshd (deleted)", ""},
+	} {
+		if got := sshProcess(process{exe: test.exe}); got != test.want {
+			t.Errorf("sshProcess(%q) = %q, want %q", test.exe, got, test.want)
+		}
+	}
+}
+
+func TestConnectionMatchesIPv4MappedIPv6Socket(t *testing.T) {
+	s := socket{
+		local:  netip.MustParseAddrPort("[::ffff:192.0.2.20]:22"),
+		remote: netip.MustParseAddrPort("[::ffff:192.0.2.10]:52644"),
+	}
+	if !connectionMatches("192.0.2.10 52644 192.0.2.20 22", s) {
+		t.Fatal("IPv4 SSH_CONNECTION did not match IPv4-mapped IPv6 socket")
+	}
+	if connectionMatches("192.0.2.11 52644 192.0.2.20 22", s) {
+		t.Fatal("different remote address matched")
+	}
+}
 
 func TestParseAddress(t *testing.T) {
 	for _, test := range []struct {
@@ -102,6 +133,13 @@ func TestListSessionsUsesLiveSocketAndMarksCurrent(t *testing.T) {
 	if !s.Current || !s.Authenticated || !s.ListenerMatch || s.PID != 101 {
 		t.Fatalf("unexpected session: %+v", s)
 	}
+	sessions, err = listSessions(root, 200, "127.0.0.3 50001 127.0.0.1 22")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Current {
+		t.Fatalf("SSH_CONNECTION should disambiguate process ancestry: %+v", sessions)
+	}
 }
 
 func TestListSessionsCollapsesSharedSocketOwners(t *testing.T) {
@@ -125,5 +163,32 @@ func TestListSessionsCollapsesSharedSocketOwners(t *testing.T) {
 	}
 	if len(sessions) != 1 || sessions[0].SharedOwners != 2 || !sessions[0].Current {
 		t.Fatalf("expected one current session with two owners, got %+v", sessions)
+	}
+}
+
+func TestScanSessionsReportsIncompleteCurrentAncestry(t *testing.T) {
+	root := t.TempDir()
+	writeProcessFixture(t, root, 200, 999, 2000, "/usr/local/bin/seer")
+	_, status, err := scanSessions(root, 200, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Incomplete {
+		t.Fatal("missing current parent was not reported")
+	}
+}
+
+func TestScanSessionsReportsUnreadableSSHDescriptors(t *testing.T) {
+	root := t.TempDir()
+	writeProcessFixture(t, root, 100, 1, 1000, "/usr/sbin/sshd")
+	if err := os.Remove(filepath.Join(root, "100/fd")); err != nil {
+		t.Fatal(err)
+	}
+	_, status, err := scanSessions(root, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Incomplete {
+		t.Fatal("unreadable SSH descriptors were not reported")
 	}
 }

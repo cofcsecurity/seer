@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"os"
 	"seer/pkg/ssh"
 	"seer/pkg/utils"
 	"strings"
@@ -16,9 +15,10 @@ func SessionEnd() *cobra.Command {
 	var yes bool
 	end := &cobra.Command{
 		Use: "end [session-id]", Short: "End one inbound SSH connection",
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeSessionIDs(true),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			sessions, err := ssh.ListSessions()
+			sessions, status, err := ssh.ListSessionsWithStatus()
 			if err != nil {
 				return err
 			}
@@ -35,7 +35,8 @@ func SessionEnd() *cobra.Command {
 				return fmt.Errorf("SSH session %q is no longer visible", args[0])
 			}
 			fmt.Fprint(cmd.OutOrStdout(), sessionOutput(*target, true, terminalColor(cmd.OutOrStdout())))
-			confirmed, currentRisk := confirmSessionEnd(cmd, *target, foundCurrent, yes)
+			fmt.Fprintln(cmd.OutOrStdout(), "Ending this SSH connection may disconnect multiple sessions or forwards.")
+			confirmed, currentRisk := confirmSessionEnd(cmd, *target, foundCurrent, status.Incomplete, yes)
 			if !confirmed {
 				fmt.Fprintln(cmd.OutOrStdout(), "Canceled.")
 				return nil
@@ -43,7 +44,7 @@ func SessionEnd() *cobra.Command {
 			if err := ssh.EndSession(args[0], currentRisk); err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "SIGTERM sent to SSH connection process.")
+			fmt.Fprintln(cmd.OutOrStdout(), "SSH connection close requested.")
 			return nil
 		},
 	}
@@ -51,8 +52,8 @@ func SessionEnd() *cobra.Command {
 	return end
 }
 
-func confirmSessionEnd(cmd *cobra.Command, target ssh.Session, foundCurrent, yes bool) (bool, bool) {
-	currentRisk := target.Current || (os.Getenv("SSH_CONNECTION") != "" && !foundCurrent)
+func confirmSessionEnd(cmd *cobra.Command, target ssh.Session, foundCurrent, scanIncomplete, yes bool) (bool, bool) {
+	currentRisk := target.Current || ((ssh.SSHContextPresent() || scanIncomplete) && !foundCurrent)
 	if currentRisk {
 		var warning string
 		if target.Current {

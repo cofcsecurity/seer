@@ -39,6 +39,23 @@ type Session struct {
 	Sources       []string
 }
 
+// ScanStatus records whether missing process information may have hidden an
+// SSH connection, including the connection that invoked Seer.
+type ScanStatus struct {
+	Incomplete bool
+	Reasons    []string
+}
+
+func (s *ScanStatus) add(reason string) {
+	s.Incomplete = true
+	for _, existing := range s.Reasons {
+		if existing == reason {
+			return
+		}
+	}
+	s.Reasons = append(s.Reasons, reason)
+}
+
 type process struct {
 	pid         int
 	ppid        int
@@ -49,6 +66,7 @@ type process struct {
 	netNS       string
 	sockets     map[uint64]bool
 	fdsReadable bool
+	fdReadError bool
 }
 
 type socket struct {
@@ -187,7 +205,11 @@ func readProcess(root string, pid int) (process, error) {
 		p.fdsReadable = true
 		for _, fd := range fds {
 			target, err := os.Readlink(filepath.Join(base, "fd", fd.Name()))
-			if err != nil || !strings.HasPrefix(target, "socket:[") || !strings.HasSuffix(target, "]") {
+			if err != nil {
+				p.fdReadError = true
+				continue
+			}
+			if !strings.HasPrefix(target, "socket:[") || !strings.HasSuffix(target, "]") {
 				continue
 			}
 			inode, err := strconv.ParseUint(strings.TrimSuffix(strings.TrimPrefix(target, "socket:["), "]"), 10, 64)
@@ -200,9 +222,9 @@ func readProcess(root string, pid int) (process, error) {
 }
 
 func sshProcess(p process) string {
-	name := filepath.Base(p.exe)
+	name := filepath.Base(strings.TrimSuffix(p.exe, " (deleted)"))
 	switch name {
-	case "sshd", "sshd-session":
+	case "sshd", "sshd-session", "sshd-auth":
 		return "inbound"
 	case "ssh":
 		return "outbound"
@@ -226,7 +248,9 @@ func connectionMatches(value string, s socket) bool {
 	}
 	client, e1 := netip.ParseAddrPort(net.JoinHostPort(f[0], f[1]))
 	server, e2 := netip.ParseAddrPort(net.JoinHostPort(f[2], f[3]))
-	return e1 == nil && e2 == nil && client == s.remote && server == s.local
+	return e1 == nil && e2 == nil &&
+		client.Port() == s.remote.Port() && client.Addr().Unmap() == s.remote.Addr().Unmap() &&
+		server.Port() == s.local.Port() && server.Addr().Unmap() == s.local.Addr().Unmap()
 }
 
 func ancestorOf(candidate, self int, procs map[int]process) bool {
@@ -248,18 +272,29 @@ func ancestorOf(candidate, self int, procs map[int]process) bool {
 // ListSessions returns live SSH transports visible to the caller. Reading all
 // processes and namespaces is usually possible only as root.
 func ListSessions() ([]Session, error) {
-	sessions, err := listSessions("/proc", os.Getpid(), os.Getenv("SSH_CONNECTION"))
+	sessions, _, err := ListSessionsWithStatus()
+	return sessions, err
+}
+
+func ListSessionsWithStatus() ([]Session, ScanStatus, error) {
+	sessions, status, err := scanSessions("/proc", os.Getpid(), os.Getenv("SSH_CONNECTION"))
 	if err != nil {
-		return nil, err
+		return nil, status, err
 	}
 	enrichSessions(sessions)
-	return sessions, nil
+	return sessions, status, nil
 }
 
 func listSessions(root string, self int, ownConnection string) ([]Session, error) {
+	sessions, _, err := scanSessions(root, self, ownConnection)
+	return sessions, err
+}
+
+func scanSessions(root string, self int, ownConnection string) ([]Session, ScanStatus, error) {
+	var status ScanStatus
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return nil, err
+		return nil, status, err
 	}
 	procs := make(map[int]process)
 	representatives := make(map[string][]int)
@@ -272,9 +307,21 @@ func listSessions(root string, self int, ownConnection string) ([]Session, error
 		}
 		p, err := readProcess(root, pid)
 		if err != nil {
+			if os.IsPermission(err) {
+				status.add("some process records were not readable")
+			}
 			continue // A process may exit during enumeration.
 		}
 		procs[pid] = p
+		if sshProcess(p) != "" && (!p.fdsReadable || p.fdReadError) {
+			status.add("an SSH process had unreadable file descriptors")
+		}
+		if sshProcess(p) != "" && p.netNS == "" {
+			status.add("an SSH process had an unreadable network namespace")
+		}
+		if p.exe == "" && len(p.sockets) > 0 {
+			status.add("a socket owner had an unreadable executable")
+		}
 		if !p.fdsReadable {
 			unreadableFDs++
 		}
@@ -283,6 +330,17 @@ func listSessions(root string, self int, ownConnection string) ([]Session, error
 		}
 		if p.netNS != "" {
 			representatives[p.netNS] = append(representatives[p.netNS], pid)
+		}
+	}
+	if self > 0 {
+		for pid, seen := self, make(map[int]bool); pid > 1 && !seen[pid]; {
+			seen[pid] = true
+			p, ok := procs[pid]
+			if !ok {
+				status.add("current process ancestry was incomplete")
+				break
+			}
+			pid = p.ppid
 		}
 	}
 	if unreadableFDs > 0 {
@@ -297,11 +355,27 @@ func listSessions(root string, self int, ownConnection string) ([]Session, error
 			name string
 			ipv6 bool
 		}{{"tcp", false}, {"tcp6", true}} {
+			read, denied := false, false
 			for _, pid := range pids {
 				data, err := os.ReadFile(filepath.Join(root, strconv.Itoa(pid), "net", kind.name))
 				if err == nil {
 					sockets = append(sockets, parseSocketTable(data, kind.ipv6, ns)...)
+					read = true
 					break
+				}
+				if os.IsPermission(err) {
+					denied = true
+				}
+			}
+			if !read && denied {
+				status.add("a TCP socket table was not readable")
+			}
+			if !read && kind.name == "tcp" {
+				for _, pid := range pids {
+					if sshProcess(procs[pid]) != "" {
+						status.add("an SSH network namespace had no readable TCP table")
+						break
+					}
 				}
 			}
 		}
@@ -361,7 +435,8 @@ func listSessions(root string, self int, ownConnection string) ([]Session, error
 					}
 				}
 			}
-			current := direction == "inbound" && (ancestorOf(p.pid, self, procs) || connectionMatches(ownConnection, sock))
+			current := direction == "inbound" &&
+				(connectionMatches(ownConnection, sock) || (ownConnection == "" && ancestorOf(p.pid, self, procs)))
 			sources := []string{"TCP socket", "/proc/PID/fd", "/proc/PID/stat"}
 			if authenticated {
 				sources = append(sources, "child SSH_CONNECTION")
@@ -422,5 +497,5 @@ func listSessions(root string, self int, ownConnection string) ([]Session, error
 		}
 		return result[i].PID < result[j].PID
 	})
-	return result, nil
+	return result, status, nil
 }

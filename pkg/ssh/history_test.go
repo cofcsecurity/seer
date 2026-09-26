@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"compress/gzip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,6 +27,61 @@ func TestFailedSSHMessage(t *testing.T) {
 		if got := failedSSHMessage(test.line); got != test.want {
 			t.Errorf("failedSSHMessage(%q) = %t, want %t", test.line, got, test.want)
 		}
+	}
+}
+
+func TestAuthLogTailReadsGzipRotation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.log.2.gz")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressed := gzip.NewWriter(file)
+	if _, err := compressed.Write([]byte("Sep 25 13:40:02 host sshd[10]: Failed password for bob\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := compressed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got := authLogTail(path, 10, true)
+	if len(got) != 1 || !strings.Contains(got[0], "Failed password") {
+		t.Fatalf("gzip history = %q", got)
+	}
+}
+
+func TestFindAuthLogPathsIncludesOnlyKnownRotations(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "auth.log")
+	for _, path := range []string{base, base + ".1", base + ".2.gz", base + ".old.gz", base + ".bak"} {
+		if err := os.WriteFile(path, []byte(""), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := findAuthLogPaths([]string{base})
+	want := []string{base, base + ".1", base + ".2.gz"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("log paths = %q, want %q", got, want)
+	}
+}
+
+func TestHistoryDeduplicatesJournalAndTextLogEvent(t *testing.T) {
+	journal := "2026-09-25T13:40:02+0000 host sshd[10]: Failed password for bob"
+	textLog := "Sep 25 13:40:02 host sshd[10]: Failed password for bob"
+	seen := make(map[string]bool)
+	if got := newHistoryLines([]string{journal}, seen); len(got) != 1 {
+		t.Fatalf("journal event missing: %q", got)
+	}
+	if got := newHistoryLines([]string{textLog}, seen); len(got) != 0 {
+		t.Fatalf("duplicate text event remained: %q", got)
+	}
+	rfc3339 := "2026-09-25T13:40:02Z host sshd[10]: Failed password for bob"
+	if got := newHistoryLines([]string{rfc3339}, seen); len(got) != 0 {
+		t.Fatalf("RFC3339 duplicate remained: %q", got)
+	}
+	if got := newHistoryLines([]string{journal, journal}, make(map[string]bool)); len(got) != 2 {
+		t.Fatalf("same-source events were collapsed: %q", got)
 	}
 }
 

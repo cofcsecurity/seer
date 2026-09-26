@@ -27,6 +27,26 @@ func TestParseKeyWithOptions(t *testing.T) {
 	}
 }
 
+func TestExpandKeyPathsUsesAuthorizedKeysFileGlobs(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home[team]")
+	dir := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"keys-a", "keys-b"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paths, err := expandKeyPaths([]string{"%h/.ssh/keys-*", ".ssh/keys-a"}, Account{Name: "alice", Home: home})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 2 || paths[0] != filepath.Join(dir, "keys-a") || paths[1] != filepath.Join(dir, "keys-b") {
+		t.Fatalf("unexpected key paths: %q", paths)
+	}
+}
+
 func fingerprintForBlob(encoded string) string {
 	blob, _ := base64.StdEncoding.DecodeString(encoded)
 	sum := sha256.Sum256(blob)

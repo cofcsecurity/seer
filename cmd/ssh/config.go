@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"fmt"
+	"path/filepath"
 	"seer/pkg/ssh"
 	"sort"
 
@@ -53,6 +54,7 @@ func Config() *cobra.Command {
 			for _, key := range keys {
 				fmt.Printf("%s %s\n", key, effective[key])
 			}
+			printRunningServers(path)
 			return nil
 		},
 	}
@@ -63,4 +65,27 @@ func Config() *cobra.Command {
 	check.Flags().StringVar(&lport, "lport", "", "server port for Match rules")
 	config.AddCommand(list, check)
 	return config
+}
+
+func printRunningServers(checkedPath string) {
+	servers, err := ssh.RunningServers()
+	if err != nil {
+		fmt.Printf("Runtime SSH inspection unavailable: %v\n", err)
+	} else if len(servers) == 0 {
+		fmt.Println("No running sshd listener or inetd instance was visible.")
+	} else {
+		for _, server := range servers {
+			fmt.Printf("Running sshd PID %d (%s): %s\n", server.PID, server.Mode, server.Command)
+			for _, listener := range server.Listeners {
+				fmt.Printf("  Listening: %s\n", listener)
+			}
+			if server.ConfigPath != "" && filepath.Clean(server.ConfigPath) != filepath.Clean(checkedPath) {
+				fmt.Printf("  review: running sshd specifies %s; checked %s\n", server.ConfigPath, checkedPath)
+			}
+			for _, override := range server.Overrides {
+				fmt.Printf("  review: running sshd command-line override %s\n", override)
+			}
+		}
+	}
+	fmt.Println("Note: effective settings above read the file on disk; a running daemon may have loaded earlier contents.")
 }

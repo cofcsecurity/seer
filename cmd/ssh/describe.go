@@ -10,7 +10,8 @@ import (
 func SessionDescribe() *cobra.Command {
 	return &cobra.Command{
 		Use: "describe [session-id]", Short: "Describe a live SSH connection",
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeSessionIDs(false),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessions, err := ssh.ListSessions()
 			if err != nil {

@@ -2,10 +2,16 @@ package ssh
 
 import (
 	"bufio"
+	"compress/gzip"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 func failedSSHMessage(line string) bool {
@@ -25,8 +31,17 @@ func authLogTail(path string, limit int, failed bool) []string {
 		return nil
 	}
 	defer file.Close()
+	var reader io.Reader = file
+	if strings.HasSuffix(path, ".gz") {
+		compressed, err := gzip.NewReader(file)
+		if err != nil {
+			return nil
+		}
+		defer compressed.Close()
+		reader = compressed
+	}
 	var lines []string
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -40,6 +55,81 @@ func authLogTail(path string, limit int, failed bool) []string {
 		}
 	}
 	return lines
+}
+
+func authLogPaths() []string {
+	return findAuthLogPaths([]string{"/var/log/auth.log", "/var/log/secure", "/var/log/messages", "/var/log/syslog"})
+}
+
+func findAuthLogPaths(bases []string) []string {
+	var paths []string
+	for _, base := range bases {
+		matches, _ := filepath.Glob(base + "*")
+		for _, path := range matches {
+			if !(path == base || rotatedLogName(base, path) ||
+				(strings.HasSuffix(path, ".gz") && rotatedLogName(base, strings.TrimSuffix(path, ".gz")))) {
+				continue
+			}
+			if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+				paths = append(paths, path)
+			}
+		}
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func rotatedLogName(base, path string) bool {
+	suffix := strings.TrimPrefix(path, base+".")
+	if suffix == path {
+		return false
+	}
+	_, err := strconv.Atoi(suffix)
+	return err == nil
+}
+
+func eventKey(line string) string {
+	start := strings.Index(line, "sshd[")
+	if start < 0 {
+		start = strings.Index(line, "sshd-session[")
+	}
+	if start < 0 {
+		return line
+	}
+	fields := strings.Fields(line)
+	var date, clock string
+	if len(fields) > 0 {
+		if parsed, err := time.Parse("2006-01-02T15:04:05-0700", fields[0]); err == nil {
+			date, clock = parsed.Format("01-02"), parsed.Format("15:04:05")
+		} else if parsed, err := time.Parse(time.RFC3339, fields[0]); err == nil {
+			date, clock = parsed.Format("01-02"), parsed.Format("15:04:05")
+		} else if len(fields) >= 3 {
+			if parsed, err := time.Parse("Jan 2 15:04:05", strings.Join(fields[:3], " ")); err == nil {
+				date, clock = parsed.Format("01-02"), parsed.Format("15:04:05")
+			}
+		}
+	}
+	if date == "" {
+		return line
+	}
+	return date + " " + clock + " " + line[start:]
+}
+
+func newHistoryLines(lines []string, seen map[string]bool) []string {
+	var unique []string
+	var sourceKeys []string
+	for _, line := range lines {
+		key := eventKey(line)
+		if seen[key] {
+			continue
+		}
+		unique = append(unique, line)
+		sourceKeys = append(sourceKeys, key)
+	}
+	for _, key := range sourceKeys {
+		seen[key] = true
+	}
+	return unique
 }
 
 func journalEvents(path string, limit int, failed bool) []string {
@@ -91,8 +181,9 @@ func LoginHistory(failed bool, limit int) (string, error) {
 		return "", fmt.Errorf("limit must be between 1 and 500")
 	}
 	var sections []string
+	seen := make(map[string]bool)
 	if path := systemCommand("journalctl"); path != "" {
-		if lines := journalEvents(path, limit, failed); len(lines) > 0 {
+		if lines := newHistoryLines(journalEvents(path, limit, failed), seen); len(lines) > 0 {
 			label := "all types"
 			if failed {
 				label = "failed authentication"
@@ -100,8 +191,8 @@ func LoginHistory(failed bool, limit int) (string, error) {
 			sections = append(sections, fmt.Sprintf("SSH daemon journal entries (%s):\n%s\n", label, strings.Join(lines, "\n")))
 		}
 	}
-	for _, path := range []string{"/var/log/auth.log", "/var/log/secure", "/var/log/messages", "/var/log/syslog"} {
-		if lines := authLogTail(path, limit, failed); len(lines) > 0 {
+	for _, path := range authLogPaths() {
+		if lines := newHistoryLines(authLogTail(path, limit, failed), seen); len(lines) > 0 {
 			label := "all types"
 			if failed {
 				label = "failed authentication"

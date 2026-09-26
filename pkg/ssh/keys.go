@@ -68,32 +68,67 @@ func keyPaths(account Account, configPath, clientAddr string) ([]string, error) 
 	effective, configErr := EffectiveConfig(configPath, criteria)
 	if configErr == nil {
 		if value, ok := effective["authorizedkeysfile"]; ok {
-			patterns = strings.Fields(value)
+			var err error
+			patterns, err = configArguments(value)
+			if err != nil {
+				return nil, fmt.Errorf("invalid AuthorizedKeysFile paths: %w", err)
+			}
 		}
 	}
+	paths, err := expandKeyPaths(patterns, account)
+	if err != nil {
+		return nil, err
+	}
+	return paths, configErr
+}
+
+func expandKeyPaths(patterns []string, account Account) ([]string, error) {
 	var paths []string
 	seen := make(map[string]bool)
 	for _, pattern := range patterns {
 		if pattern == "none" {
 			continue
 		}
+		wildcard := strings.ContainsAny(pattern, "*?[")
+		home, name, uid := account.Home, account.Name, account.UID
+		if wildcard {
+			home, name, uid = globLiteral(home), globLiteral(name), globLiteral(uid)
+		}
 		pattern = strings.ReplaceAll(pattern, "%%", "\x00")
-		pattern = strings.ReplaceAll(pattern, "%h", account.Home)
-		pattern = strings.ReplaceAll(pattern, "%u", account.Name)
-		pattern = strings.ReplaceAll(pattern, "%U", account.UID)
+		pattern = strings.ReplaceAll(pattern, "%h", home)
+		pattern = strings.ReplaceAll(pattern, "%u", name)
+		pattern = strings.ReplaceAll(pattern, "%U", uid)
 		pattern = strings.ReplaceAll(pattern, "\x00", "%")
 		if strings.Contains(pattern, "%") {
 			continue
 		} // Unknown expansion.
 		if !filepath.IsAbs(pattern) {
-			pattern = filepath.Join(account.Home, pattern)
+			base := account.Home
+			if wildcard {
+				base = globLiteral(base)
+			}
+			pattern = filepath.Join(base, pattern)
 		}
-		if !seen[pattern] {
-			seen[pattern] = true
-			paths = append(paths, pattern)
+		matches := []string{pattern}
+		if wildcard {
+			var err error
+			matches, err = filepath.Glob(pattern)
+			if err != nil {
+				return nil, fmt.Errorf("invalid AuthorizedKeysFile pattern %q: %w", pattern, err)
+			}
+		}
+		for _, path := range matches {
+			if !seen[path] {
+				seen[path] = true
+				paths = append(paths, path)
+			}
 		}
 	}
-	return paths, configErr
+	return paths, nil
+}
+
+func globLiteral(value string) string {
+	return strings.NewReplacer("\\", "\\\\", "*", "\\*", "?", "\\?", "[", "\\[").Replace(value)
 }
 
 func keyType(value string) bool {
@@ -200,6 +235,9 @@ func ListKeys(username, configPath, clientAddr string) ([]AuthorizedKey, error) 
 		}
 		found = true
 		paths, configErr := keyPaths(account, configPath, clientAddr)
+		if configErr != nil && len(paths) == 0 {
+			return nil, fmt.Errorf("could not resolve authorized key paths for %s: %w", account.Name, configErr)
+		}
 		if configErr != nil && !warnedConfig {
 			slog.Warn("Could not read effective SSH key paths; using standard authorized_keys locations", "error", configErr.Error())
 			warnedConfig = true

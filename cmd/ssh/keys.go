@@ -2,7 +2,6 @@ package ssh
 
 import (
 	"fmt"
-	"os"
 	"seer/pkg/ssh"
 	"seer/pkg/utils"
 
@@ -33,7 +32,8 @@ func Keys() *cobra.Command {
 	var describeLine int
 	describe := &cobra.Command{
 		Use: "describe [fingerprint]", Short: "Describe an authorized key",
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeKeyFingerprints(&username, &configPath, &clientAddr),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			found, err := ssh.ListKeys(username, configPath, clientAddr)
 			if err != nil {
@@ -54,7 +54,8 @@ func Keys() *cobra.Command {
 	var removeLine int
 	remove := &cobra.Command{
 		Use: "remove [fingerprint]", Short: "Remove one authorized key",
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeKeyFingerprints(&username, &configPath, &clientAddr),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			found, err := ssh.ListKeys(username, configPath, clientAddr)
 			if err != nil {
@@ -66,7 +67,7 @@ func Keys() *cobra.Command {
 			}
 			fmt.Print(matches[0].Describe())
 			if !allowCurrentAccess {
-				sessions, err := ssh.ListSessions()
+				sessions, status, err := ssh.ListSessionsWithStatus()
 				if err != nil {
 					return err
 				}
@@ -80,7 +81,7 @@ func Keys() *cobra.Command {
 						return fmt.Errorf("key belongs to the current SSH account; use --allow-current-access to override")
 					}
 				}
-				if os.Getenv("SSH_CONNECTION") != "" && !foundCurrent {
+				if (ssh.SSHContextPresent() || status.Incomplete) && !foundCurrent {
 					return fmt.Errorf("current SSH session could not be identified; use --allow-current-access to override")
 				}
 			}
@@ -103,7 +104,19 @@ func Keys() *cobra.Command {
 	remove.Flags().BoolVar(&allowCurrentAccess, "allow-current-access", false, "allow removing a key for the current SSH account")
 	remove.Flags().StringVar(&removePath, "path", "", "authorized_keys file containing the key")
 	remove.Flags().IntVar(&removeLine, "line", 0, "line number of the key")
-	keys.AddCommand(list, describe, remove)
+	sources := &cobra.Command{
+		Use: "sources", Short: "Show SSH key, certificate, and host-key sources for one account",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			report, err := ssh.AuthenticationSources(username, configPath, clientAddr)
+			if err != nil {
+				return err
+			}
+			fmt.Fprint(cmd.OutOrStdout(), report.String())
+			return nil
+		},
+	}
+	keys.AddCommand(list, describe, remove, sources)
 	return keys
 }
 
