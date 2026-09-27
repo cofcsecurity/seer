@@ -5,6 +5,7 @@ import (
 	"seer/cmd/groups"
 	"seer/cmd/procs"
 	"seer/cmd/socks"
+	"seer/cmd/ssh"
 	"seer/cmd/users"
 
 	"log/slog"
@@ -14,7 +15,7 @@ import (
 
 func main() {
 	var logLevel = new(slog.LevelVar)
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
 	slog.SetDefault(logger)
 
 	var verboseLogging bool
@@ -33,6 +34,7 @@ func main() {
 	root.AddCommand(groups.Groups())
 	root.AddCommand(procs.Procs())
 	root.AddCommand(socks.Socks())
+	root.AddCommand(ssh.SSH())
 
 	root.PersistentFlags().BoolVarP(&verboseLogging, "verbose", "v", false, "enable verbose logging")
 

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="124" viewBox="0 0 1180 124" role="img" aria-label="Terminal showing the current SSH connection in yellow">
+  <rect width="1180" height="124" rx="8" fill="#161b22"/>
+  <g font-family="monospace" font-size="15">
+    <text x="20" y="32" fill="#8b949e">root@system:/# seer ssh list</text>
+    <text x="20" y="67" fill="#f2cc60">[1832:567890:41852:9f62a3b0178a4c20] inbound 192.0.2.10:52644 -&gt; 192.0.2.20:22 alice pid:1832 authenticated [CURRENT SESSION]</text>
+    <text x="20" y="100" fill="#c9d1d9">[2417:568301:41998:641a63b779024ffd] inbound 192.0.2.11:50218 -&gt; 192.0.2.20:22 bob pid:2417 authenticated</text>
+  </g>
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="162" viewBox="0 0 1080 162" role="img" aria-label="Terminal showing the current SSH connection warning in red">
+  <rect width="1080" height="162" rx="8" fill="#161b22"/>
+  <g font-family="monospace" font-size="15">
+    <text x="20" y="31" fill="#8b949e">root@system:/# seer ssh end 1832:567890:41852:9f62a3b0178a4c20 --yes</text>
+    <text x="20" y="63" fill="#ff6b6b">WARNING: This is your current SSH connection. Ending it will disconnect this terminal.</text>
+    <text x="20" y="91" fill="#c9d1d9">--yes does not skip confirmation for a possible current connection.</text>
+    <text x="20" y="119" fill="#c9d1d9">End this possible current connection? (yes/no): yes</text>
+    <text x="20" y="147" fill="#c9d1d9">Confirm again to end this SSH connection? (yes/no): no</text>
+  </g>
+</svg>
