@@ -35,7 +35,7 @@ func SessionEnd() *cobra.Command {
 				return fmt.Errorf("SSH session %q is no longer visible", args[0])
 			}
 			fmt.Fprint(cmd.OutOrStdout(), sessionOutput(*target, true, terminalColor(cmd.OutOrStdout())))
-			fmt.Fprintln(cmd.OutOrStdout(), "Ending this SSH connection may disconnect multiple sessions or forwards.")
+			fmt.Fprintln(cmd.OutOrStdout(), paint("Ending this SSH connection may disconnect multiple sessions or forwards.", ansiYellow, terminalColor(cmd.OutOrStdout())))
 			confirmed, currentRisk := confirmSessionEnd(cmd, *target, foundCurrent, status.Incomplete, yes)
 			if !confirmed {
 				fmt.Fprintln(cmd.OutOrStdout(), "Canceled.")
@@ -44,7 +44,7 @@ func SessionEnd() *cobra.Command {
 			if err := ssh.EndSession(args[0], currentRisk); err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "SSH connection close requested.")
+			fmt.Fprintln(cmd.OutOrStdout(), paint("SSH connection close requested.", ansiCyan, terminalColor(cmd.OutOrStdout())))
 			return nil
 		},
 	}

@@ -9,6 +9,8 @@ checks before an action.
 
 This document describes the sources and checks used by the current code. See
 the [README](../README.md#ssh-inspection-and-administration) for example output.
+The command layer adds terminal color to IDs, field names, findings, and
+history events. It leaves redirected output and `NO_COLOR` output unchanged.
 
 ## Live connections: `list` and `describe`
 

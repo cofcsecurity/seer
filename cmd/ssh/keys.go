@@ -22,8 +22,9 @@ func Keys() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			color := terminalColor(cmd.OutOrStdout())
 			for _, key := range found {
-				fmt.Print(key.String())
+				fmt.Fprint(cmd.OutOrStdout(), keyListOutput(key, color))
 			}
 			return nil
 		},
@@ -43,7 +44,7 @@ func Keys() *cobra.Command {
 			if len(matches) != 1 {
 				return fmt.Errorf("expected one key with that fingerprint, found %d; use --user, --path, and --line to narrow it", len(matches))
 			}
-			fmt.Print(matches[0].Describe())
+			fmt.Fprint(cmd.OutOrStdout(), labelOutput(matches[0].Describe(), terminalColor(cmd.OutOrStdout())))
 			return nil
 		},
 	}
@@ -65,7 +66,7 @@ func Keys() *cobra.Command {
 			if len(matches) != 1 {
 				return fmt.Errorf("expected one key with that fingerprint, found %d; use --user, --path, and --line to narrow it", len(matches))
 			}
-			fmt.Print(matches[0].Describe())
+			fmt.Fprint(cmd.OutOrStdout(), labelOutput(matches[0].Describe(), terminalColor(cmd.OutOrStdout())))
 			if !allowCurrentAccess {
 				sessions, status, err := ssh.ListSessionsWithStatus()
 				if err != nil {
@@ -86,17 +87,17 @@ func Keys() *cobra.Command {
 				}
 			}
 			if !yes && !utils.Confirm() {
-				fmt.Println("Canceled.")
+				fmt.Fprintln(cmd.OutOrStdout(), "Canceled.")
 				return nil
 			}
 			backup, err := ssh.RemoveKey(matches[0], configPath, clientAddr)
 			if backup != "" {
-				fmt.Printf("Backup: %s\n", backup)
+				fmt.Fprintln(cmd.OutOrStdout(), paint("Backup:", ansiCyan, terminalColor(cmd.OutOrStdout())), backup)
 			}
 			if err != nil {
 				return err
 			}
-			fmt.Println("Removed one authorized key entry.")
+			fmt.Fprintln(cmd.OutOrStdout(), paint("Removed one authorized key entry.", ansiGreen, terminalColor(cmd.OutOrStdout())))
 			return nil
 		},
 	}
@@ -112,7 +113,7 @@ func Keys() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprint(cmd.OutOrStdout(), report.String())
+			fmt.Fprint(cmd.OutOrStdout(), sourcesOutput(report.String(), terminalColor(cmd.OutOrStdout())))
 			return nil
 		},
 	}

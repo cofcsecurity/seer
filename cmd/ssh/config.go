@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"fmt"
+	"io"
 	"path/filepath"
 	"seer/pkg/ssh"
 	"sort"
@@ -21,8 +22,9 @@ func Config() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			out, color := cmd.OutOrStdout(), terminalColor(cmd.OutOrStdout())
 			for _, r := range rules {
-				fmt.Printf("%s:%d %s %s\n", r.Path, r.Line, r.Key, r.Value)
+				fmt.Fprint(out, configRuleOutput(r, color))
 			}
 			return nil
 		},
@@ -39,12 +41,15 @@ func Config() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Println("SSH configuration syntax: valid")
+			out, color := cmd.OutOrStdout(), terminalColor(cmd.OutOrStdout())
+			fmt.Fprintln(out, "SSH configuration syntax:", paint("valid", ansiGreen, color))
 			if user == "" || addr == "" {
-				fmt.Println("Note: supply --user and --addr to evaluate connection-specific Match rules.")
+				fmt.Fprintln(out, paint("Note: supply --user and --addr to evaluate connection-specific Match rules.", ansiYellow, color))
 			}
+			levels := make(map[string]string)
 			for _, finding := range ssh.CheckConfig(effective) {
-				fmt.Printf("%s: %s=%s: %s\n", finding.Level, finding.Key, finding.Value, finding.Reason)
+				fmt.Fprint(out, configFindingOutput(finding, color))
+				levels[finding.Key] = finding.Level
 			}
 			keys := make([]string, 0, len(effective))
 			for key := range effective {
@@ -52,9 +57,9 @@ func Config() *cobra.Command {
 			}
 			sort.Strings(keys)
 			for _, key := range keys {
-				fmt.Printf("%s %s\n", key, effective[key])
+				fmt.Fprint(out, configEffectiveOutput(key, effective[key], levels[key], color))
 			}
-			printRunningServers(path)
+			printRunningServers(out, path, color)
 			return nil
 		},
 	}
@@ -67,25 +72,25 @@ func Config() *cobra.Command {
 	return config
 }
 
-func printRunningServers(checkedPath string) {
+func printRunningServers(out io.Writer, checkedPath string, color bool) {
 	servers, err := ssh.RunningServers()
 	if err != nil {
-		fmt.Printf("Runtime SSH inspection unavailable: %v\n", err)
+		fmt.Fprintln(out, warningOutput(fmt.Sprintf("Runtime SSH inspection unavailable: %v", err), color))
 	} else if len(servers) == 0 {
-		fmt.Println("No running sshd listener or inetd instance was visible.")
+		fmt.Fprintln(out, "No running sshd listener or inetd instance was visible.")
 	} else {
 		for _, server := range servers {
-			fmt.Printf("Running sshd PID %d (%s): %s\n", server.PID, server.Mode, server.Command)
+			fmt.Fprintln(out, paint(fmt.Sprintf("Running sshd PID %d (%s):", server.PID, server.Mode), ansiCyan, color), server.Command)
 			for _, listener := range server.Listeners {
-				fmt.Printf("  Listening: %s\n", listener)
+				fmt.Fprintln(out, "  "+paint("Listening:", ansiCyan, color), listener)
 			}
 			if server.ConfigPath != "" && filepath.Clean(server.ConfigPath) != filepath.Clean(checkedPath) {
-				fmt.Printf("  review: running sshd specifies %s; checked %s\n", server.ConfigPath, checkedPath)
+				fmt.Fprintln(out, paint(fmt.Sprintf("  review: running sshd specifies %s; checked %s", server.ConfigPath, checkedPath), ansiYellow, color))
 			}
 			for _, override := range server.Overrides {
-				fmt.Printf("  review: running sshd command-line override %s\n", override)
+				fmt.Fprintln(out, paint(fmt.Sprintf("  review: running sshd command-line override %s", override), ansiYellow, color))
 			}
 		}
 	}
-	fmt.Println("Note: effective settings above read the file on disk; a running daemon may have loaded earlier contents.")
+	fmt.Fprintln(out, paint("Note: effective settings above read the file on disk; a running daemon may have loaded earlier contents.", ansiYellow, color))
 }

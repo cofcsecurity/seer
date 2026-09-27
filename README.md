@@ -6,6 +6,11 @@ Extendable system enumeration and administration tool for linux
 
 ### Installation
 
+Building Seer requires Go 1.23 or newer. Check `go version` before building:
+the Go package in a distribution's repositories may be older, even after
+updating and upgrading packages. If needed, install a newer Go toolchain using
+the [official Go instructions](https://go.dev/doc/install).
+
 After cloning this repository run the following commands from the root level of the project:
 ```
 go build -o seer
@@ -116,6 +121,12 @@ absent. Run as root
 for the most complete process and socket visibility. In an interactive terminal,
 the current connection is highlighted in yellow. The text marker remains when
 color is disabled or output is redirected.
+
+SSH output uses color to make the important parts easier to scan: cyan for
+IDs, setting names, and field labels; yellow for review items and the current
+connection; red for warnings and failed logins; and green for valid checks and
+accepted logins. Output stays plain when redirected, when `TERM=dumb`, or
+when `NO_COLOR` is set.
 
 See [SSH command family](docs/ssh-architecture.md) for the data sources,
 connection checks, and action safeguards behind these commands.

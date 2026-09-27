@@ -18,7 +18,7 @@ func History() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Print(output)
+			fmt.Fprint(cmd.OutOrStdout(), historyOutput(output, failed, terminalColor(cmd.OutOrStdout())))
 			return nil
 		},
 	}
