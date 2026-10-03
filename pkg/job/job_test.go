@@ -215,3 +215,35 @@ func TestJobStringAndDescribe(t *testing.T) {
 		t.Fatalf("disabled String() = %q", got)
 	}
 }
+
+func TestNamedFieldsAndDuplicateIDs(t *testing.T) {
+	if !validSchedule([]string{"0", "9", "*", "JAN", "mon-fri"}) {
+		t.Fatal("named month/weekday schedule should be valid")
+	}
+	path := filepath.Join(t.TempDir(), "crontab")
+	line := "0 9 * * * echo hi\n"
+	if err := os.WriteFile(path, []byte(line+line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	jobs, _ := parseFile(path, false, "u")
+	if len(jobs) != 2 || jobs[0].ID == jobs[1].ID {
+		t.Fatalf("duplicate lines must get distinct IDs, got %+v", jobs)
+	}
+	if jobs[0].ID != jobID(path, "0 9 * * * echo hi") {
+		t.Fatal("first occurrence must keep its original ID")
+	}
+}
+
+func TestScheduleRole(t *testing.T) {
+	for schedule, want := range map[string]Role{
+		"@reboot": RoleReboot, "@daily": RoleMacro,
+		"* * * * *": RoleFrequent, "*/5 * * * *": RoleFrequent, "0 3 * * *": RoleStandard,
+	} {
+		if got := (Job{Schedule: schedule}).ScheduleRole(); got != want {
+			t.Errorf("ScheduleRole(%q) = %q, want %q", schedule, got, want)
+		}
+	}
+	if (Job{User: "root"}).UserRole() != RoleUserRoot {
+		t.Error("root should be RoleUserRoot")
+	}
+}

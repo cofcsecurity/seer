@@ -24,18 +24,40 @@ type Job struct {
 }
 
 func (j Job) String() string {
-	disabled := ""
-	if !j.Enabled {
-		disabled = " [DISABLED]"
-	}
-
-	return fmt.Sprintf("[%s] %s %s %q%s\n", j.ID, j.Schedule, j.User, j.Command, disabled)
+	return j.StringStyled(nil)
 }
 
 func (j Job) Describe() string {
+	return j.DescribeStyled(nil)
+}
+
+// StringStyled renders the one-line form, passing each part through style
+// (nil leaves the text untouched) so callers can color by role.
+func (j Job) StringStyled(style Style) string {
 	disabled := ""
 	if !j.Enabled {
-		disabled = " [DISABLED]"
+		disabled = " " + style.apply(RoleDisabled, "[DISABLED]")
+	}
+
+	return fmt.Sprintf("[%s] %s %s %s%s\n",
+		style.apply(RoleID, j.ID),
+		style.apply(j.ScheduleRole(), j.Schedule),
+		style.apply(j.UserRole(), j.User),
+		style.apply(RoleCommand, fmt.Sprintf("%q", j.Command)),
+		disabled,
+	)
+}
+
+// DescribeStyled renders the detailed form with the same styling hook.
+func (j Job) DescribeStyled(style Style) string {
+	disabled := ""
+	if !j.Enabled {
+		disabled = " " + style.apply(RoleDisabled, "[DISABLED]")
+	}
+
+	schedule := j.Schedule
+	if human := DescribeSchedule(j.Schedule); human != "" {
+		schedule = fmt.Sprintf("%s (%s)", j.Schedule, human)
 	}
 
 	desc := "┌ %s%s\n"
@@ -46,11 +68,11 @@ func (j Job) Describe() string {
 	desc += "└ Raw: %s\n"
 
 	return fmt.Sprintf(desc,
-		j.ID, disabled,
+		style.apply(RoleID, j.ID), disabled,
 		j.Source, j.LineNumber,
-		j.User,
-		j.Schedule,
-		j.Command,
+		style.apply(j.UserRole(), j.User),
+		style.apply(j.ScheduleRole(), schedule),
+		style.apply(RoleCommand, j.Command),
 		j.Raw,
 	)
 }
@@ -74,9 +96,10 @@ var scheduleMacros = map[string]bool{
 //	steps
 //	comma-separated lists
 //
-// Named months and weekdays, such as JAN and MON, are not recognized.
+// Three-letter month and weekday names, such as JAN and MON, are accepted.
 var scheduleFieldPattern = regexp.MustCompile(
-	`^(\*|[0-9]+)(-[0-9]+)?(/[0-9]+)?(,(\*|[0-9]+)(-[0-9]+)?(/[0-9]+)?)*$`,
+	`^(?i)(\*|[0-9]+|[a-z]{3})(-([0-9]+|[a-z]{3}))?(/[0-9]+)?` +
+		`(,(\*|[0-9]+|[a-z]{3})(-([0-9]+|[a-z]{3}))?(/[0-9]+)?)*$`,
 )
 
 func jobID(source, raw string) string {
@@ -225,6 +248,7 @@ func parseFile(path string, systemFormat bool, spoolUser string) (jobs []Job, wa
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
 
 	lineNumber := 0
+	seen := make(map[string]int)
 
 	for scanner.Scan() {
 		lineNumber++
@@ -249,8 +273,16 @@ func parseFile(path string, systemFormat bool, spoolUser string) (jobs []Job, wa
 			continue
 		}
 
+		// Identical lines in one file would otherwise share an ID, making
+		// the second one unreachable by enable/disable/remove.
+		id := jobID(path, raw)
+		if n := seen[id]; n > 0 {
+			id = jobID(path, fmt.Sprintf("%s\x00%d", raw, n))
+		}
+		seen[jobID(path, raw)]++
+
 		jobs = append(jobs, Job{
-			ID:         jobID(path, raw),
+			ID:         id,
 			Source:     path,
 			User:       user,
 			Schedule:   schedule,

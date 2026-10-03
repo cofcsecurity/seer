@@ -9,7 +9,9 @@ import (
 )
 
 func JobList() *cobra.Command {
-	return &cobra.Command{
+	var userFilter string
+	var onlyDisabled, onlyEnabled bool
+	list := &cobra.Command{
 		Use: "list", Aliases: []string{"ls"},
 		Short: "List scheduled cron jobs across all users",
 		Args:  cobra.NoArgs,
@@ -17,6 +19,10 @@ func JobList() *cobra.Command {
 			jobs, warnings := job.ListJobs()
 			color := terminalColor(cmd.OutOrStdout())
 			for _, j := range jobs {
+				if (userFilter != "" && j.User != userFilter) ||
+					(onlyDisabled && j.Enabled) || (onlyEnabled && !j.Enabled) {
+					continue
+				}
 				fmt.Fprint(cmd.OutOrStdout(), jobOutput(j, false, color))
 			}
 			errColor := terminalColor(cmd.ErrOrStderr())
@@ -26,4 +32,9 @@ func JobList() *cobra.Command {
 			return nil
 		},
 	}
+	list.Flags().StringVarP(&userFilter, "user", "u", "", "only show jobs owned by this user")
+	list.Flags().BoolVar(&onlyDisabled, "disabled", false, "only show disabled jobs")
+	list.Flags().BoolVar(&onlyEnabled, "enabled", false, "only show enabled jobs")
+	list.MarkFlagsMutuallyExclusive("disabled", "enabled")
+	return list
 }

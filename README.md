@@ -40,7 +40,9 @@ commands above in that session. After updating Seer, install the new binary
 before testing completion. `seer ssh -h` should show the SSH commands in that
 binary. With completion active, `seer ssh describe` and `seer ssh end`
 suggest visible session IDs. The `seer ssh keys describe` and
-`seer ssh keys remove` commands suggest visible key fingerprints.
+`seer ssh keys remove` commands suggest visible key fingerprints. The
+`seer job describe`, `enable`, `disable`, and `remove` commands suggest visible
+cron job IDs.
 
 For other shells see `seer completion -h`
 
@@ -330,3 +332,67 @@ sources vary by distro. Seer also reads numbered and gzip-compressed log
 rotations and suppresses matching journal/text duplicates. System `wtmp` and `btmp`
 records are not SSH-specific and do not establish whether a connection is
 still active.
+
+### Cron job inspection and administration
+
+`seer job list` shows cron jobs from `/etc/crontab`, `/etc/cron.d`,
+`/var/spool/cron`, and `/var/spool/cron/crontabs`. System files take the owner
+from the line, and per-user files take it from the filename. Commented-out
+entries that still parse as jobs are listed as `[DISABLED]`. Run as root for
+the most complete visibility. A file Seer cannot read is reported as a warning
+and does not hide jobs from other files.
+
+Job output uses color to make the important parts easier to scan. The owner is
+red for root, magenta for system accounts, green for regular users, and dim
+when the account cannot be found. The schedule is magenta for `@reboot`, blue
+for other `@` macros, yellow for jobs that run every minute or every few
+minutes, and cyan for ordinary schedules. IDs are dim, and disabled jobs are
+dimmed with a yellow `[DISABLED]` tag. Output stays plain when redirected,
+when `TERM=dumb`, or when `NO_COLOR` is set.
+
+List and describe cron jobs:
+```
+root@system:/# seer job list
+[a1b2c3d4e5f60718] 30 2 * * 1-5 root "/usr/local/bin/backup.sh"
+[0f9e8d7c6b5a4e31] */10 * * * * alice "~/sync.sh" [DISABLED]
+[1122334455667788] @reboot root "/opt/app/start"
+root@system:/# seer job describe a1b2c3d4e5f60718
+┌ a1b2c3d4e5f60718
+├ Source: /etc/crontab (line 12)
+├ User: root
+├ Schedule: 30 2 * * 1-5 (At 02:30 on Monday through Friday)
+├ Command: /usr/local/bin/backup.sh
+└ Raw: 30 2 * * 1-5 root /usr/local/bin/backup.sh
+```
+
+`describe` explains the schedule in words, including steps, ranges, lists, and
+month or weekday names. Seer builds the job ID from the source file and the
+line text. If the same line appears twice in one file, the second copy gets its
+own ID. Copy a fresh ID from `job list` before acting.
+
+Filter the list by owner or state:
+```
+root@system:/# seer job list --user alice --disabled
+[0f9e8d7c6b5a4e31] */10 * * * * alice "~/sync.sh" [DISABLED]
+```
+
+`--enabled` and `--disabled` cannot be used together.
+
+Disable, enable, or remove a job using an ID from `job list`:
+```
+root@system:/# seer job disable a1b2c3d4e5f60718
+┌ a1b2c3d4e5f60718
+├ Source: /etc/crontab (line 12)
+├ User: root
+├ Schedule: 30 2 * * 1-5 (At 02:30 on Monday through Friday)
+├ Command: /usr/local/bin/backup.sh
+└ Raw: 30 2 * * 1-5 root /usr/local/bin/backup.sh
+Continue? (yes/no): yes
+Job disabled. Backup saved to /etc/.seer-job-backup-abc123
+```
+
+`disable` comments out the line, and `enable` removes the comment. `remove`
+deletes the line from its source file and warns that the CLI cannot undo it.
+Each action rechecks the line before writing, saves a backup in the same
+directory, and keeps the file's mode, owner, and extended attributes. Use
+`--yes` to skip the confirmation prompt.
