@@ -1,0 +1,39 @@
+package job
+
+import (
+	"fmt"
+
+	"seer/pkg/job"
+	"seer/pkg/utils"
+
+	"github.com/spf13/cobra"
+)
+
+func JobRemove() *cobra.Command {
+	var yes bool
+	remove := &cobra.Command{
+		Use: "remove [job-id]", Short: "Permanently remove a scheduled cron job",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeJobIDs(nil),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := findTarget(args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Fprint(cmd.OutOrStdout(), jobOutput(*target, true, terminalColor(cmd.OutOrStdout())))
+			fmt.Fprintln(cmd.OutOrStdout(), paint("This deletes the line from its source file. A backup is kept, but the CLI cannot undo this.", ansiYellow, terminalColor(cmd.OutOrStdout())))
+			if !yes && !utils.Confirm() {
+				fmt.Fprintln(cmd.OutOrStdout(), "Canceled.")
+				return nil
+			}
+			backup, err := job.Remove(args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), paint("Job removed. Backup saved to "+backup, ansiCyan, terminalColor(cmd.OutOrStdout())))
+			return nil
+		},
+	}
+	remove.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
+	return remove
+}
