@@ -10,7 +10,7 @@ import (
 )
 
 func JobRemove() *cobra.Command {
-	var yes bool
+	var yes, preview bool
 	remove := &cobra.Command{
 		Use: "remove [job-id]", Short: "Permanently remove a scheduled cron job",
 		Args:              cobra.ExactArgs(1),
@@ -20,7 +20,19 @@ func JobRemove() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprint(cmd.OutOrStdout(), jobOutput(*target, true, terminalColor(cmd.OutOrStdout())))
+			if preview {
+				text, err := job.Diff(job.OpRemove, args[0])
+				if err != nil {
+					return err
+				}
+				fmt.Fprint(cmd.OutOrStdout(), colorDiff(text, terminalColor(cmd.OutOrStdout())))
+				return nil
+			}
+			color := terminalColor(cmd.OutOrStdout())
+			if color {
+				fmt.Fprint(cmd.OutOrStdout(), legend(true))
+			}
+			fmt.Fprint(cmd.OutOrStdout(), jobOutput(*target, true, color))
 			fmt.Fprintln(cmd.OutOrStdout(), paint("This deletes the line from its source file. A backup is kept, but the CLI cannot undo this.", ansiYellow, terminalColor(cmd.OutOrStdout())))
 			if !yes && !utils.Confirm() {
 				fmt.Fprintln(cmd.OutOrStdout(), "Canceled.")
@@ -35,5 +47,6 @@ func JobRemove() *cobra.Command {
 		},
 	}
 	remove.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
+	remove.Flags().BoolVar(&preview, "preview", false, "show only the lines that would change, without applying them")
 	return remove
 }

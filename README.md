@@ -336,38 +336,32 @@ still active.
 ### Cron job inspection and administration
 
 `seer job list` shows cron jobs from `/etc/crontab`, `/etc/cron.d`,
-`/var/spool/cron`, and `/var/spool/cron/crontabs`. System files take the owner
-from the line, and per-user files take it from the filename. It also lists the
-scripts in `/etc/cron.hourly`, `/etc/cron.daily`, `/etc/cron.weekly`, and
-`/etc/cron.monthly`, and the entries in `/etc/anacrontab`. These run as root,
-are tagged `[periodic]` or `[anacron]`, and are read-only: `enable`, `disable`,
-and `remove` refuse them and name the file to edit. A periodic script that is
-not executable, or whose name contains a dot (which `run-parts` skips), is
-shown as `[DISABLED]`. Run as root for the most complete visibility. A file
-Seer cannot read is reported as a warning and does not hide jobs from other
-files.
+`/var/spool/cron`, and `/var/spool/cron/crontabs`, plus the scripts in
+`/etc/cron.{hourly,daily,weekly,monthly}` and the entries in
+`/etc/anacrontab`. The last two run as root, are tagged `[periodic]` or
+`[anacron]`, and are read-only: `enable`, `disable`, and `remove` refuse them
+and name the file to edit. Jobs cron ignores, such as `/etc/cron.d` files with
+unusable names or non-executable periodic scripts, show as `[DISABLED]` and
+read-only, with a `Note:` in `describe` explaining why. Run as root for the
+most complete visibility. An unreadable file is reported as a warning and does
+not hide jobs from other files.
 
-`job disable` comments out a line with a `#[seer-disabled]` marker, and only
-lines carrying that marker are listed as disabled jobs. Ordinary comments,
-including ones that happen to look like a cron entry, are ignored.
-
-Job output uses color to make the important parts easier to scan. The owner is
-red for root, magenta for system accounts, green for regular users, and dim
-when the account cannot be found. The schedule is magenta for `@reboot`, blue
-for other `@` macros, yellow for jobs that run every minute or every few
-minutes, and cyan for ordinary schedules. IDs are dim, `[periodic]` and
-`[anacron]` tags are blue, and a risky job is shown entirely in red. Disabled jobs are dimmed with
-a yellow `[DISABLED]` tag. Output stays plain when redirected, when
-`TERM=dumb`, or when `NO_COLOR` is set. `seer job list --legend` prints a
-line explaining the colors and tags.
+Output uses a small set of colors. Root is bold and other users are cyan.
+Red marks a risky job, shown entirely in red. Yellow marks a schedule that
+runs every minute or every few minutes, and `[DISABLED]`. Everything else is
+plain, and risky and disabled jobs also carry `[RISK]` and `[DISABLED]` text
+tags, so those do not depend on color alone. Output stays plain when
+redirected, when `TERM=dumb`, or when `NO_COLOR` is set. On a color terminal, `list`, `describe`, and the confirmation views of `disable`,
+`enable`, and `remove` start with a short color key. The key is omitted when
+there is nothing to list or color is off.
 
 An enabled root job is tagged `[RISK]` when its command could be replaced by
-someone other than root. Seer checks the first word of the command when it is
-an absolute path, along with its symlink target and every parent directory. It
-reports a path owned by another user, writable by any user, or writable by a
-non-root group, and a command that runs from `/tmp`, `/var/tmp`, or
-`/dev/shm`. Commands found through `PATH` are not checked. These are review
-prompts, not proof of a weakness.
+someone else. Seer checks the first word of the command when it is an absolute
+path, along with its symlink target and every parent directory. It reports a
+path owned by another user, writable by any user, or writable by a non-root
+group, and a command that runs from `/tmp`, `/var/tmp`, or `/dev/shm`.
+Commands found through `PATH` are not checked. These are review prompts, not
+proof of a weakness.
 
 List and describe cron jobs:
 ```
@@ -388,43 +382,40 @@ root@system:/# seer job describe a1b2c3d4e5f60718
 └ Raw: 30 2 * * 1-5 root /tmp/backup.sh
 ```
 
-`describe` explains the schedule in words, including steps, ranges, lists, and
-month or weekday names, and shows the next run time for editable jobs. A
-disabled job shows `never (disabled)`. Periodic and anacron jobs show no run
-time because cron or anacron chooses it. Seer builds the job ID from the source
-file and the line text. If the same line appears twice in one file, the second
-copy gets its own ID. Copy a fresh ID from `job list` before acting.
+![Example job list with a color key: red for risk, yellow for attention, cyan for non-root users](docs/job-list.svg)
 
-Filter the list by owner or state:
-```
-root@system:/# seer job list --user alice --disabled
-[0f9e8d7c6b5a4e31] */10 * * * * alice "~/sync.sh" [DISABLED]
-root@system:/# seer job list --risky
-[a1b2c3d4e5f60718] 30 2 * * 1-5 root "/tmp/backup.sh" [RISK]
-```
+![Example risky job shown entirely in red](docs/job-risk.svg)
 
-`--enabled` and `--disabled` cannot be used together.
+`describe` explains the schedule in words and shows the next run for editable
+jobs. Seer builds the job ID from the source file and line text, so copy a
+fresh ID from `job list` before acting. Filter the list with `--user`,
+`--enabled`, `--disabled` (not together), or `--risky`. Add `--json` to
+`job list` or `job describe` for machine-readable output.
 
 Disable, enable, or remove a job using an ID from `job list`:
 ```
 root@system:/# seer job disable a1b2c3d4e5f60718
 ┌ a1b2c3d4e5f60718
-├ Type: crontab
-├ Source: /etc/crontab (line 12)
-├ User: root
-├ Schedule: 30 2 * * 1-5 (At 02:30 on Monday through Friday)
-├ Next run: 2026-10-05 02:30 (in 1d 16h)
-├ Command: /tmp/backup.sh
-├ Risk: runs from temporary directory /tmp
-└ Raw: 30 2 * * 1-5 root /tmp/backup.sh
+... job details ...
 Continue? (yes/no): yes
 Job disabled. Backup saved to /etc/.seer-job-backup-abc123
-root@system:/# seer job disable 5566778899aabbcc
-Error: job "5566778899aabbcc" comes from periodic and is read-only; edit /etc/cron.daily/logrotate directly
 ```
 
-`disable` comments out the line, and `enable` removes the comment. `remove`
-deletes the line from its source file and warns that the CLI cannot undo it.
-Each action rechecks the line before writing, saves a backup in the same
-directory, and keeps the file's mode, owner, and extended attributes. Use
-`--yes` to skip the confirmation prompt.
+`disable` comments out the line with a `#[seer-disabled]` marker, and only
+lines with that marker are listed as disabled jobs. Ordinary comments are
+ignored. `enable` removes the marker, and `remove` deletes the line and warns
+that it cannot be undone. Each action rechecks the line, saves a backup in the
+same directory, and keeps the file's mode, owner, and extended attributes. Use
+`--yes` to skip the prompt.
+
+Add `--preview` to see only the lines that would change. It writes nothing,
+makes no backup, and asks for no confirmation:
+```
+root@system:/# seer job disable a1b2c3d4e5f60718 --preview
+--- /etc/crontab
++++ /etc/crontab (proposed)
+@@ line 12 @@
+ # nightly jobs
+-30 2 * * 1-5 root /tmp/backup.sh
++#[seer-disabled] 30 2 * * 1-5 root /tmp/backup.sh
+```

@@ -260,63 +260,103 @@ func findJob(id string) (Job, error) {
 	return Job{}, fmt.Errorf("job %q not found", id)
 }
 
-// errReadOnly rejects changes to jobs from sources Seer does not rewrite.
-func errReadOnly(j Job) error {
-	return fmt.Errorf("job %q comes from %s and is read-only; edit %s directly", j.ID, j.Kind, j.Source)
+// Operation is a change Seer can make to a job's source line.
+type Operation string
+
+const (
+	OpDisable Operation = "disable"
+	OpEnable  Operation = "enable"
+	OpRemove  Operation = "remove"
+)
+
+// plan finds the job and returns it with its replacement line (nil removes
+// the line), rejecting read-only jobs and no-op changes.
+func plan(op Operation, id string) (target Job, replacement *string, err error) {
+	target, err = findJob(id)
+	if err != nil {
+		return Job{}, nil, err
+	}
+
+	if target.ReadOnly {
+		msg := fmt.Sprintf("job %q comes from %s and is read-only; edit %s directly", id, target.Kind, target.Source)
+		if target.Note != "" {
+			msg += " (" + target.Note + ")"
+		}
+		return Job{}, nil, fmt.Errorf("%s", msg)
+	}
+
+	switch op {
+	case OpDisable:
+		if !target.Enabled {
+			return Job{}, nil, fmt.Errorf("job %q is already disabled", id)
+		}
+		line := DisabledMarker + " " + target.Raw
+		return target, &line, nil
+	case OpEnable:
+		if target.Enabled {
+			return Job{}, nil, fmt.Errorf("job %q is already enabled", id)
+		}
+		line := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(target.Raw), DisabledMarker), "#"))
+		return target, &line, nil
+	case OpRemove:
+		// No enabled/disabled guard: removing a disabled job is valid.
+		return target, nil, nil
+	}
+
+	return Job{}, nil, fmt.Errorf("unknown operation %q", op)
+}
+
+// Apply performs op on the job and returns the path of the backup it saved.
+func Apply(op Operation, id string) (backupPath string, err error) {
+	target, replacement, err := plan(op, id)
+	if err != nil {
+		return "", err
+	}
+
+	return rewriteSource(target, replacement)
+}
+
+// Diff shows what Apply would change, without touching any file. The output
+// is a small unified-style diff with one line of context on each side.
+func Diff(op Operation, id string) (string, error) {
+	target, replacement, err := plan(op, id)
+	if err != nil {
+		return "", err
+	}
+
+	return diffFor(target, replacement)
+}
+
+func diffFor(target Job, replacement *string) (string, error) {
+	lines, index, _, err := locateLine(target.Source, target.LineNumber, target.Raw)
+	if err != nil {
+		return "", err
+	}
+
+	trim := func(line string) string { return strings.TrimRight(line, "\r\n") }
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "--- %s\n+++ %s (proposed)\n@@ line %d @@\n", target.Source, target.Source, index+1)
+
+	if index > 0 {
+		fmt.Fprintf(&b, " %s\n", trim(lines[index-1]))
+	}
+	fmt.Fprintf(&b, "-%s\n", trim(lines[index]))
+	if replacement != nil {
+		fmt.Fprintf(&b, "+%s\n", *replacement)
+	}
+	if index+1 < len(lines) && trim(lines[index+1]) != "" {
+		fmt.Fprintf(&b, " %s\n", trim(lines[index+1]))
+	}
+
+	return b.String(), nil
 }
 
 // Disable comments out job's line. Errors if the job is already disabled.
-func Disable(id string) (backupPath string, err error) {
-	target, err := findJob(id)
-	if err != nil {
-		return "", err
-	}
-
-	if target.ReadOnly {
-		return "", errReadOnly(target)
-	}
-
-	if !target.Enabled {
-		return "", fmt.Errorf("job %q is already disabled", id)
-	}
-
-	replacement := DisabledMarker + " " + target.Raw
-
-	return rewriteSource(target, &replacement)
-}
+func Disable(id string) (string, error) { return Apply(OpDisable, id) }
 
 // Enable uncomments job's line. Errors if the job is already enabled.
-func Enable(id string) (backupPath string, err error) {
-	target, err := findJob(id)
-	if err != nil {
-		return "", err
-	}
+func Enable(id string) (string, error) { return Apply(OpEnable, id) }
 
-	if target.ReadOnly {
-		return "", errReadOnly(target)
-	}
-
-	if target.Enabled {
-		return "", fmt.Errorf("job %q is already enabled", id)
-	}
-
-	line := strings.TrimSpace(target.Raw)
-	replacement := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, DisabledMarker), "#"))
-
-	return rewriteSource(target, &replacement)
-}
-
-// Remove deletes job's line entirely. No enabled/disabled guard, removing
-// a disabled job is valid.
-func Remove(id string) (backupPath string, err error) {
-	target, err := findJob(id)
-	if err != nil {
-		return "", err
-	}
-
-	if target.ReadOnly {
-		return "", errReadOnly(target)
-	}
-
-	return rewriteSource(target, nil)
-}
+// Remove deletes job's line entirely.
+func Remove(id string) (string, error) { return Apply(OpRemove, id) }

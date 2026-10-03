@@ -10,7 +10,7 @@ import (
 )
 
 func JobDisable() *cobra.Command {
-	var yes bool
+	var yes, preview bool
 	disable := &cobra.Command{
 		Use: "disable [job-id]", Short: "Disable a scheduled cron job",
 		Args:              cobra.ExactArgs(1),
@@ -20,7 +20,19 @@ func JobDisable() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprint(cmd.OutOrStdout(), jobOutput(*target, true, terminalColor(cmd.OutOrStdout())))
+			if preview {
+				text, err := job.Diff(job.OpDisable, args[0])
+				if err != nil {
+					return err
+				}
+				fmt.Fprint(cmd.OutOrStdout(), colorDiff(text, terminalColor(cmd.OutOrStdout())))
+				return nil
+			}
+			color := terminalColor(cmd.OutOrStdout())
+			if color {
+				fmt.Fprint(cmd.OutOrStdout(), legend(true))
+			}
+			fmt.Fprint(cmd.OutOrStdout(), jobOutput(*target, true, color))
 			if !yes && !utils.Confirm() {
 				fmt.Fprintln(cmd.OutOrStdout(), "Canceled.")
 				return nil
@@ -34,6 +46,7 @@ func JobDisable() *cobra.Command {
 		},
 	}
 	disable.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
+	disable.Flags().BoolVar(&preview, "preview", false, "show only the lines that would change, without applying them")
 	return disable
 }
 

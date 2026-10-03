@@ -9,14 +9,12 @@ import (
 )
 
 const (
-	ansiReset   = "\x1b[0m"
-	ansiCyan    = "\x1b[1;36m"
-	ansiYellow  = "\x1b[1;33m"
-	ansiRed     = "\x1b[1;31m"
-	ansiGreen   = "\x1b[1;32m"
-	ansiBlue    = "\x1b[1;34m"
-	ansiMagenta = "\x1b[1;35m"
-	ansiDim     = "\x1b[2m"
+	ansiReset  = "\x1b[0m"
+	ansiCyan   = "\x1b[1;36m"
+	ansiYellow = "\x1b[1;33m"
+	ansiRed    = "\x1b[1;31m"
+	ansiGreen  = "\x1b[1;32m"
+	ansiBold   = "\x1b[1m"
 )
 
 func paint(value, style string, color bool) string {
@@ -38,20 +36,16 @@ func terminalColor(out io.Writer) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
+// A deliberately small palette: red for risk, yellow for things that need a
+// look, cyan for non-root owners, and bold for root. Nothing is dimmed, since
+// dim text has too little contrast for many readers; every marker is also a
+// text label, so no meaning depends on color alone.
 var roleColors = map[job.Role]string{
-	job.RoleID:          ansiDim,
-	job.RoleCommand:     "",
 	job.RoleDisabled:    ansiYellow,
-	job.RoleUserRoot:    ansiRed,
-	job.RoleUserSystem:  ansiMagenta,
-	job.RoleUserRegular: ansiGreen,
-	job.RoleUserUnknown: ansiDim,
-	job.RoleRisk:        ansiRed,
-	job.RoleReadOnly:    ansiBlue,
-	job.RoleReboot:      ansiMagenta,
-	job.RoleMacro:       ansiBlue,
 	job.RoleFrequent:    ansiYellow,
-	job.RoleStandard:    ansiCyan,
+	job.RoleRisk:        ansiRed,
+	job.RoleUserRoot:    ansiBold,
+	job.RoleUserRegular: ansiCyan,
 }
 
 func roleStyle(role job.Role, text string) string {
@@ -81,29 +75,37 @@ func jobOutput(j job.Job, detail, color bool) string {
 		}
 		return strings.Join(lines, "\n") + "\n"
 	}
-	if !color || j.Enabled {
-		return line
-	}
-	return paint(strings.TrimSuffix(line, "\n"), ansiDim, true) + "\n"
+	return line
 }
 
-// legend explains the colors and tags used in job output.
+// legend returns a short color key, followed by a blank line, to print above
+// job output.
 func legend(color bool) string {
 	var style job.Style
 	if color {
 		style = roleStyle
 	}
-	parts := []string{
-		"owner: " + style.Apply(job.RoleUserRoot, "root") + " " +
-			style.Apply(job.RoleUserSystem, "system") + " " +
-			style.Apply(job.RoleUserRegular, "user"),
-		"schedule: " + style.Apply(job.RoleReboot, "@reboot") + " " +
-			style.Apply(job.RoleMacro, "@macro") + " " +
-			style.Apply(job.RoleFrequent, "frequent") + " " +
-			style.Apply(job.RoleStandard, "fixed"),
-		style.Apply(job.RoleRisk, "[RISK]") + " root job with a tamperable command",
-		style.Apply(job.RoleReadOnly, "[periodic]") + " " + style.Apply(job.RoleReadOnly, "[anacron]") + " read-only",
-		style.Apply(job.RoleDisabled, "[DISABLED]"),
+	a := style.Apply
+	return "Owner:  " + a(job.RoleUserRoot, "root") + "  " + a(job.RoleUserRegular, "user") + "  system\n" +
+		"Marks:  " + a(job.RoleFrequent, "frequent") + "  " + a(job.RoleDisabled, "[DISABLED]") + "  " +
+		a(job.RoleRisk, "[RISK]") + " tamperable  " + "[periodic] [anacron]" + " read-only\n\n"
+}
+
+// colorDiff colors removed lines red and added lines green.
+func colorDiff(text string, color bool) string {
+	if !color {
+		return text
 	}
-	return "Legend: " + strings.Join(parts, "; ") + "\n"
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	for i, l := range lines {
+		switch {
+		case strings.HasPrefix(l, "---"), strings.HasPrefix(l, "+++"), strings.HasPrefix(l, "@@"):
+			lines[i] = paint(l, ansiCyan, true)
+		case strings.HasPrefix(l, "-"):
+			lines[i] = paint(l, ansiRed, true)
+		case strings.HasPrefix(l, "+"):
+			lines[i] = paint(l, ansiGreen, true)
+		}
+	}
+	return strings.Join(lines, "\n") + "\n"
 }

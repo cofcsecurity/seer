@@ -347,3 +347,51 @@ func TestDescribeShowsNextRunAndRisk(t *testing.T) {
 		t.Error("String() should show [RISK]")
 	}
 }
+
+func TestDiffFor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "crontab")
+	content := "# header\n0 0 * * * root /bin/a\n\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	j := Job{Source: path, LineNumber: 2, Raw: "0 0 * * * root /bin/a"}
+
+	repl := DisabledMarker + " " + j.Raw
+	got, err := diffFor(j, &repl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "--- " + path + "\n+++ " + path + " (proposed)\n@@ line 2 @@\n # header\n-0 0 * * * root /bin/a\n+#[seer-disabled] 0 0 * * * root /bin/a\n"
+	if got != want {
+		t.Fatalf("diff =\n%s\nwant\n%s", got, want)
+	}
+
+	got, _ = diffFor(j, nil)
+	if strings.Contains(got, "\n+#") || !strings.Contains(got, "\n-0 0 * * * root /bin/a\n") {
+		t.Fatalf("remove diff wrong:\n%s", got)
+	}
+	if content2, _ := os.ReadFile(path); string(content2) != content {
+		t.Fatal("diff must not modify the file")
+	}
+}
+
+func TestCronDIgnoredAndJSON(t *testing.T) {
+	if cronDIgnored(".hidden") == "" || cronDIgnored("app~") == "" && !fileExists("/etc/debian_version") {
+		t.Fatal("hidden files and editor backups should be ignored")
+	}
+	if cronDIgnored("app") != "" {
+		t.Fatal("plain names are run")
+	}
+
+	now = func() time.Time { return time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC) }
+	defer func() { now = time.Now }()
+	data, err := (Job{ID: "x", User: "root", Schedule: "30 11 * * *", Command: "c", Enabled: true, Kind: KindCrontab}).MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"next_run":"2026-10-03T11:30:00Z"`, `"user_type":"root"`, `"risks":[]`, `"description":"At 11:30 every day"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("JSON missing %s: %s", want, data)
+		}
+	}
+}

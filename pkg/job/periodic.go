@@ -52,14 +52,23 @@ func periodicJobs() (jobs []Job, warnings []string) {
 				continue
 			}
 
+			note := ""
+			switch {
+			case !periodicName.MatchString(entry.Name()):
+				note = "run-parts skips names containing anything but letters, digits, underscores and hyphens"
+			case info.Mode()&0o111 == 0:
+				note = "run-parts skips files that are not executable"
+			}
+
 			jobs = append(jobs, Job{
+				Note:     note,
 				ID:       jobID(path, path),
 				Source:   path,
 				User:     "root",
 				Schedule: p.schedule,
 				Command:  path,
 				Raw:      path,
-				Enabled:  periodicName.MatchString(entry.Name()) && info.Mode()&0o111 != 0,
+				Enabled:  note == "",
 				Kind:     KindPeriodic,
 				ReadOnly: true,
 			})
@@ -157,4 +166,29 @@ func anacronSchedule(period string) (string, bool) {
 	}
 
 	return fmt.Sprintf("@every-%dd", n), true
+}
+
+// cronDIgnored explains why cron skips a file in /etc/cron.d, or returns "".
+// Debian's cron only runs names made of letters, digits, underscores and
+// hyphens; other implementations skip hidden files and editor or package
+// manager leftovers.
+func cronDIgnored(name string) string {
+	if strings.HasPrefix(name, ".") {
+		return "cron ignores hidden files in /etc/cron.d"
+	}
+
+	if fileExists("/etc/debian_version") {
+		if !periodicName.MatchString(name) {
+			return "cron on Debian ignores /etc/cron.d files whose names contain anything but letters, digits, underscores and hyphens"
+		}
+		return ""
+	}
+
+	for _, suffix := range []string{"~", ",v", ".rpmsave", ".rpmorig", ".rpmnew", ".swp"} {
+		if strings.HasSuffix(name, suffix) {
+			return "cron ignores /etc/cron.d files ending in " + suffix
+		}
+	}
+
+	return ""
 }

@@ -26,6 +26,8 @@ type Job struct {
 	Kind Kind
 	// ReadOnly jobs come from sources Seer lists but does not rewrite.
 	ReadOnly bool
+	// Note explains why a job is inactive or read-only, when it is.
+	Note string
 	// Risks lists reasons an enabled root job's command may be tampered with.
 	Risks []string
 }
@@ -111,6 +113,9 @@ func (j Job) DescribeStyled(style Style) string {
 		fmt.Fprintf(&b, "├ Next run: %s\n", next)
 	}
 	fmt.Fprintf(&b, "├ Command: %s\n", style.apply(RoleCommand, j.Command))
+	if j.Note != "" {
+		fmt.Fprintf(&b, "├ Note: %s\n", j.Note)
+	}
 	for _, risk := range j.Risks {
 		fmt.Fprintf(&b, "├ %s\n", style.apply(RoleRisk, "Risk: "+risk))
 	}
@@ -449,6 +454,13 @@ func ListJobs() (jobs []Job, warnings []string) {
 
 		for _, path := range files {
 			fileJobs, fileWarnings := parseFile(path, true, "", KindCronD)
+			if reason := cronDIgnored(filepath.Base(path)); reason != "" {
+				for i := range fileJobs {
+					fileJobs[i].Enabled = false
+					fileJobs[i].ReadOnly = true
+					fileJobs[i].Note = reason
+				}
+			}
 			jobs = append(jobs, fileJobs...)
 			warnings = append(warnings, fileWarnings...)
 		}

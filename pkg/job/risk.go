@@ -3,7 +3,9 @@ package job
 import (
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -110,8 +112,19 @@ func weakPermissions(path string) string {
 	case info.Mode().Perm()&0o002 != 0 && !(info.IsDir() && info.Mode()&os.ModeSticky != 0):
 		return path + " is writable by any user"
 	case info.Mode().Perm()&0o020 != 0 && stat.Gid != 0:
-		return fmt.Sprintf("%s is writable by group %d", path, stat.Gid)
+		return fmt.Sprintf("%s is writable by group %s", path, groupName(stat.Gid))
 	}
 
 	return ""
+}
+
+// groupName resolves a gid to its name so a finding like "group admin" can be
+// judged at a glance; it falls back to the number.
+func groupName(gid uint32) string {
+	id := strconv.FormatUint(uint64(gid), 10)
+	if g, err := user.LookupGroupId(id); err == nil {
+		return g.Name
+	}
+
+	return id
 }
