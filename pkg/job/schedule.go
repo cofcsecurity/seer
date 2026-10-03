@@ -32,7 +32,13 @@ var weekdayNames = []string{
 func DescribeSchedule(schedule string) string {
 	fields := strings.Fields(schedule)
 	if len(fields) == 1 {
-		return macroDescriptions[fields[0]]
+		if desc, ok := macroDescriptions[fields[0]]; ok {
+			return desc
+		}
+		if days, ok := strings.CutPrefix(fields[0], "@every-"); ok {
+			return "Every " + strings.TrimSuffix(days, "d") + " days (anacron)"
+		}
+		return ""
 	}
 	if len(fields) != 5 {
 		return ""
@@ -44,7 +50,7 @@ func DescribeSchedule(schedule string) string {
 
 	switch {
 	case dom == "*" && dow == "*" && month == "*":
-		if strings.HasPrefix(parts[0], "At") {
+		if strings.HasPrefix(parts[0], "At") && !strings.Contains(parts[0], "every") {
 			parts = append(parts, "every day")
 		}
 	default:
@@ -56,7 +62,12 @@ func DescribeSchedule(schedule string) string {
 			when = append(when, describeField(dow, "weekday", weekdayNames))
 		}
 		if len(when) > 0 {
-			parts = append(parts, "on "+strings.Join(when, " or "))
+			// Cron ORs the two day fields only when neither starts with "*".
+			joiner := " or "
+			if strings.HasPrefix(dom, "*") || strings.HasPrefix(dow, "*") {
+				joiner = " and "
+			}
+			parts = append(parts, "on "+strings.Join(when, joiner))
 		}
 		if month != "*" {
 			parts = append(parts, "in "+describeField(month, "month", monthNames))
@@ -81,6 +92,15 @@ func describeTime(minute, hour string) string {
 		return "At minute " + describeField(minute, "minute", nil) + " of every hour"
 	case minute == "*":
 		return "Every minute during hour " + describeField(hour, "hour", nil)
+	case mErr == nil && strings.HasPrefix(hour, "*/"):
+		return fmt.Sprintf("At minute %d of every %s hours", m, strings.TrimPrefix(hour, "*/"))
+	case mErr == nil && plainNumberList(hour):
+		var times []string
+		for _, h := range strings.Split(hour, ",") {
+			hv, _ := strconv.Atoi(h)
+			times = append(times, fmt.Sprintf("%02d:%02d", hv, m))
+		}
+		return "At " + joinWords(times)
 	case mErr == nil:
 		return fmt.Sprintf("At minute %d of hour %s", m, describeField(hour, "hour", nil))
 	default:
@@ -98,6 +118,11 @@ func describeField(field, unit string, names []string) string {
 		out = append(out, describeItem(item, unit, names))
 	}
 
+	return joinWords(out)
+}
+
+// joinWords joins items as "a", "a and b", or "a, b, and c".
+func joinWords(out []string) string {
 	switch len(out) {
 	case 1:
 		return out[0]
@@ -106,6 +131,15 @@ func describeField(field, unit string, names []string) string {
 	default:
 		return strings.Join(out[:len(out)-1], ", ") + ", and " + out[len(out)-1]
 	}
+}
+
+func plainNumberList(field string) bool {
+	for _, item := range strings.Split(field, ",") {
+		if _, err := strconv.Atoi(item); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func describeItem(item, unit string, names []string) string {

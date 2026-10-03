@@ -135,7 +135,7 @@ func TestRewriteSourceDisableAndRemove(t *testing.T) {
 	}
 
 	target := Job{Source: path, LineNumber: 2, Raw: "* * * * * root /usr/bin/true"}
-	replacement := "# * * * * * root /usr/bin/true"
+	replacement := DisabledMarker + " * * * * * root /usr/bin/true"
 	backup, err := rewriteSource(target, &replacement)
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ func TestRewriteSourceDisableAndRemove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "# keep this comment\n# * * * * * root /usr/bin/true\n0 0 * * * root /usr/bin/false\n"
+	want := "# keep this comment\n#[seer-disabled] * * * * * root /usr/bin/true\n0 0 * * * root /usr/bin/false\n"
 	if string(got) != want {
 		t.Fatalf("after disable, got %q, want %q", got, want)
 	}
@@ -169,7 +169,7 @@ func TestRewriteSourceDisableAndRemove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want = "# keep this comment\n# * * * * * root /usr/bin/true\n"
+	want = "# keep this comment\n#[seer-disabled] * * * * * root /usr/bin/true\n"
 	if string(got) != want {
 		t.Fatalf("after remove, got %q, want %q", got, want)
 	}

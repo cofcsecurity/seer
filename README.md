@@ -337,43 +337,70 @@ still active.
 
 `seer job list` shows cron jobs from `/etc/crontab`, `/etc/cron.d`,
 `/var/spool/cron`, and `/var/spool/cron/crontabs`. System files take the owner
-from the line, and per-user files take it from the filename. Commented-out
-entries that still parse as jobs are listed as `[DISABLED]`. Run as root for
-the most complete visibility. A file Seer cannot read is reported as a warning
-and does not hide jobs from other files.
+from the line, and per-user files take it from the filename. It also lists the
+scripts in `/etc/cron.hourly`, `/etc/cron.daily`, `/etc/cron.weekly`, and
+`/etc/cron.monthly`, and the entries in `/etc/anacrontab`. These run as root,
+are tagged `[periodic]` or `[anacron]`, and are read-only: `enable`, `disable`,
+and `remove` refuse them and name the file to edit. A periodic script that is
+not executable, or whose name contains a dot (which `run-parts` skips), is
+shown as `[DISABLED]`. Run as root for the most complete visibility. A file
+Seer cannot read is reported as a warning and does not hide jobs from other
+files.
+
+`job disable` comments out a line with a `#[seer-disabled]` marker, and only
+lines carrying that marker are listed as disabled jobs. Ordinary comments,
+including ones that happen to look like a cron entry, are ignored.
 
 Job output uses color to make the important parts easier to scan. The owner is
 red for root, magenta for system accounts, green for regular users, and dim
 when the account cannot be found. The schedule is magenta for `@reboot`, blue
 for other `@` macros, yellow for jobs that run every minute or every few
-minutes, and cyan for ordinary schedules. IDs are dim, and disabled jobs are
-dimmed with a yellow `[DISABLED]` tag. Output stays plain when redirected,
-when `TERM=dumb`, or when `NO_COLOR` is set.
+minutes, and cyan for ordinary schedules. IDs are dim, `[periodic]` and
+`[anacron]` tags are blue, and a risky job is shown entirely in red. Disabled jobs are dimmed with
+a yellow `[DISABLED]` tag. Output stays plain when redirected, when
+`TERM=dumb`, or when `NO_COLOR` is set. `seer job list --legend` prints a
+line explaining the colors and tags.
+
+An enabled root job is tagged `[RISK]` when its command could be replaced by
+someone other than root. Seer checks the first word of the command when it is
+an absolute path, along with its symlink target and every parent directory. It
+reports a path owned by another user, writable by any user, or writable by a
+non-root group, and a command that runs from `/tmp`, `/var/tmp`, or
+`/dev/shm`. Commands found through `PATH` are not checked. These are review
+prompts, not proof of a weakness.
 
 List and describe cron jobs:
 ```
 root@system:/# seer job list
-[a1b2c3d4e5f60718] 30 2 * * 1-5 root "/usr/local/bin/backup.sh"
+[a1b2c3d4e5f60718] 30 2 * * 1-5 root "/tmp/backup.sh" [RISK]
 [0f9e8d7c6b5a4e31] */10 * * * * alice "~/sync.sh" [DISABLED]
-[1122334455667788] @reboot root "/opt/app/start"
+[5566778899aabbcc] @daily root "/etc/cron.daily/logrotate" [periodic]
+[99aabbccddeeff00] @every-3d root "/opt/odd.sh" [anacron]
 root@system:/# seer job describe a1b2c3d4e5f60718
 ┌ a1b2c3d4e5f60718
+├ Type: crontab
 ├ Source: /etc/crontab (line 12)
 ├ User: root
 ├ Schedule: 30 2 * * 1-5 (At 02:30 on Monday through Friday)
-├ Command: /usr/local/bin/backup.sh
-└ Raw: 30 2 * * 1-5 root /usr/local/bin/backup.sh
+├ Next run: 2026-10-05 02:30 (in 1d 16h)
+├ Command: /tmp/backup.sh
+├ Risk: runs from temporary directory /tmp
+└ Raw: 30 2 * * 1-5 root /tmp/backup.sh
 ```
 
 `describe` explains the schedule in words, including steps, ranges, lists, and
-month or weekday names. Seer builds the job ID from the source file and the
-line text. If the same line appears twice in one file, the second copy gets its
-own ID. Copy a fresh ID from `job list` before acting.
+month or weekday names, and shows the next run time for editable jobs. A
+disabled job shows `never (disabled)`. Periodic and anacron jobs show no run
+time because cron or anacron chooses it. Seer builds the job ID from the source
+file and the line text. If the same line appears twice in one file, the second
+copy gets its own ID. Copy a fresh ID from `job list` before acting.
 
 Filter the list by owner or state:
 ```
 root@system:/# seer job list --user alice --disabled
 [0f9e8d7c6b5a4e31] */10 * * * * alice "~/sync.sh" [DISABLED]
+root@system:/# seer job list --risky
+[a1b2c3d4e5f60718] 30 2 * * 1-5 root "/tmp/backup.sh" [RISK]
 ```
 
 `--enabled` and `--disabled` cannot be used together.
@@ -382,13 +409,18 @@ Disable, enable, or remove a job using an ID from `job list`:
 ```
 root@system:/# seer job disable a1b2c3d4e5f60718
 ┌ a1b2c3d4e5f60718
+├ Type: crontab
 ├ Source: /etc/crontab (line 12)
 ├ User: root
 ├ Schedule: 30 2 * * 1-5 (At 02:30 on Monday through Friday)
-├ Command: /usr/local/bin/backup.sh
-└ Raw: 30 2 * * 1-5 root /usr/local/bin/backup.sh
+├ Next run: 2026-10-05 02:30 (in 1d 16h)
+├ Command: /tmp/backup.sh
+├ Risk: runs from temporary directory /tmp
+└ Raw: 30 2 * * 1-5 root /tmp/backup.sh
 Continue? (yes/no): yes
 Job disabled. Backup saved to /etc/.seer-job-backup-abc123
+root@system:/# seer job disable 5566778899aabbcc
+Error: job "5566778899aabbcc" comes from periodic and is read-only; edit /etc/cron.daily/logrotate directly
 ```
 
 `disable` comments out the line, and `enable` removes the comment. `remove`

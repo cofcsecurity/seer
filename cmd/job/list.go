@@ -10,7 +10,7 @@ import (
 
 func JobList() *cobra.Command {
 	var userFilter string
-	var onlyDisabled, onlyEnabled bool
+	var onlyDisabled, onlyEnabled, showLegend, onlyRisky bool
 	list := &cobra.Command{
 		Use: "list", Aliases: []string{"ls"},
 		Short: "List scheduled cron jobs across all users",
@@ -20,10 +20,13 @@ func JobList() *cobra.Command {
 			color := terminalColor(cmd.OutOrStdout())
 			for _, j := range jobs {
 				if (userFilter != "" && j.User != userFilter) ||
-					(onlyDisabled && j.Enabled) || (onlyEnabled && !j.Enabled) {
+					(onlyRisky && len(j.Risks) == 0) || (onlyDisabled && j.Enabled) || (onlyEnabled && !j.Enabled) {
 					continue
 				}
 				fmt.Fprint(cmd.OutOrStdout(), jobOutput(j, false, color))
+			}
+			if showLegend {
+				fmt.Fprint(cmd.OutOrStdout(), legend(color))
 			}
 			errColor := terminalColor(cmd.ErrOrStderr())
 			for _, w := range warnings {
@@ -35,6 +38,8 @@ func JobList() *cobra.Command {
 	list.Flags().StringVarP(&userFilter, "user", "u", "", "only show jobs owned by this user")
 	list.Flags().BoolVar(&onlyDisabled, "disabled", false, "only show disabled jobs")
 	list.Flags().BoolVar(&onlyEnabled, "enabled", false, "only show enabled jobs")
+	list.Flags().BoolVar(&onlyRisky, "risky", false, "only show root jobs whose command could be tampered with")
+	list.Flags().BoolVar(&showLegend, "legend", false, "print a legend explaining colors and tags")
 	list.MarkFlagsMutuallyExclusive("disabled", "enabled")
 	return list
 }

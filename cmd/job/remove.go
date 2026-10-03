@@ -14,7 +14,7 @@ func JobRemove() *cobra.Command {
 	remove := &cobra.Command{
 		Use: "remove [job-id]", Short: "Permanently remove a scheduled cron job",
 		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeJobIDs(nil),
+		ValidArgsFunction: completeJobIDs(func(j job.Job) bool { return !j.ReadOnly }),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := findTarget(args[0])
 			if err != nil {

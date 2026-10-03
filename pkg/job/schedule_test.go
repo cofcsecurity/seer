@@ -15,6 +15,10 @@ func TestDescribeSchedule(t *testing.T) {
 		"@daily":            "At 00:00 every day",
 		"@reboot":           "At system startup",
 		"0 9 * jan mon-fri": "At 09:00 on Monday through Friday in January",
+		"0 9,17 * * *":      "At 09:00 and 17:00 every day",
+		"0 */2 * * *":       "At minute 0 of every 2 hours",
+		"0 0 */2 * 1":       "At 00:00 on day-of-month every 2 days and Monday",
+		"0 0 1 * 1":         "At 00:00 on day-of-month 1 or Monday",
 		"bogus":             "",
 	} {
 		if got := DescribeSchedule(schedule); got != want {

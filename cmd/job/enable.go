@@ -14,7 +14,7 @@ func JobEnable() *cobra.Command {
 	enable := &cobra.Command{
 		Use: "enable [job-id]", Short: "Enable a disabled cron job",
 		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeJobIDs(func(j job.Job) bool { return !j.Enabled }),
+		ValidArgsFunction: completeJobIDs(func(j job.Job) bool { return !j.ReadOnly && !j.Enabled }),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := findTarget(args[0])
 			if err != nil {

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 type Job struct {
@@ -21,7 +22,28 @@ type Job struct {
 	LineNumber int
 	Raw        string
 	Enabled    bool
+	// Kind is the source type: crontab, cron.d, user, periodic, or anacron.
+	Kind Kind
+	// ReadOnly jobs come from sources Seer lists but does not rewrite.
+	ReadOnly bool
+	// Risks lists reasons an enabled root job's command may be tampered with.
+	Risks []string
 }
+
+type Kind string
+
+const (
+	KindCrontab  Kind = "crontab"
+	KindCronD    Kind = "cron.d"
+	KindUser     Kind = "user"
+	KindPeriodic Kind = "periodic"
+	KindAnacron  Kind = "anacron"
+)
+
+// DisabledMarker prefixes a line that Seer commented out. Only lines
+// carrying it are listed as disabled jobs, so ordinary comments that happen
+// to look like cron entries are not mistaken for jobs.
+const DisabledMarker = "#[seer-disabled]"
 
 func (j Job) String() string {
 	return j.StringStyled(nil)
@@ -39,12 +61,21 @@ func (j Job) StringStyled(style Style) string {
 		disabled = " " + style.apply(RoleDisabled, "[DISABLED]")
 	}
 
+	risk := ""
+	if len(j.Risks) > 0 {
+		risk = " " + style.apply(RoleRisk, "[RISK]")
+	}
+
+	if j.ReadOnly {
+		risk += " " + style.apply(RoleReadOnly, "["+string(j.Kind)+"]")
+	}
+
 	return fmt.Sprintf("[%s] %s %s %s%s\n",
 		style.apply(RoleID, j.ID),
 		style.apply(j.ScheduleRole(), j.Schedule),
 		style.apply(j.UserRole(), j.User),
 		style.apply(RoleCommand, fmt.Sprintf("%q", j.Command)),
-		disabled,
+		disabled+risk,
 	)
 }
 
@@ -56,25 +87,80 @@ func (j Job) DescribeStyled(style Style) string {
 	}
 
 	schedule := j.Schedule
-	if human := DescribeSchedule(j.Schedule); human != "" {
+	if human := j.humanSchedule(); human != "" {
 		schedule = fmt.Sprintf("%s (%s)", j.Schedule, human)
 	}
 
-	desc := "┌ %s%s\n"
-	desc += "├ Source: %s (line %d)\n"
-	desc += "├ User: %s\n"
-	desc += "├ Schedule: %s\n"
-	desc += "├ Command: %s\n"
-	desc += "└ Raw: %s\n"
+	source := j.Source
+	if j.LineNumber > 0 {
+		source = fmt.Sprintf("%s (line %d)", j.Source, j.LineNumber)
+	}
 
-	return fmt.Sprintf(desc,
-		style.apply(RoleID, j.ID), disabled,
-		j.Source, j.LineNumber,
-		style.apply(j.UserRole(), j.User),
-		style.apply(j.ScheduleRole(), schedule),
-		style.apply(RoleCommand, j.Command),
-		j.Raw,
-	)
+	kind := string(j.Kind)
+	if j.ReadOnly {
+		kind += ", read-only"
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "┌ %s%s\n", style.apply(RoleID, j.ID), disabled)
+	fmt.Fprintf(&b, "├ Type: %s\n", kind)
+	fmt.Fprintf(&b, "├ Source: %s\n", source)
+	fmt.Fprintf(&b, "├ User: %s\n", style.apply(j.UserRole(), j.User))
+	fmt.Fprintf(&b, "├ Schedule: %s\n", style.apply(j.ScheduleRole(), schedule))
+	if next := j.nextRunText(); next != "" {
+		fmt.Fprintf(&b, "├ Next run: %s\n", next)
+	}
+	fmt.Fprintf(&b, "├ Command: %s\n", style.apply(RoleCommand, j.Command))
+	for _, risk := range j.Risks {
+		fmt.Fprintf(&b, "├ %s\n", style.apply(RoleRisk, "Risk: "+risk))
+	}
+	fmt.Fprintf(&b, "└ Raw: %s\n", j.Raw)
+
+	return b.String()
+}
+
+var now = time.Now
+
+// humanSchedule explains the schedule in words. Periodic scripts run at a
+// time chosen by cron or anacron, so no clock time is claimed for them.
+func (j Job) humanSchedule() string {
+	if j.Kind == KindPeriodic {
+		return "run via run-parts " + strings.TrimPrefix(j.Schedule, "@") + "; exact time set by cron or anacron"
+	}
+
+	return DescribeSchedule(j.Schedule)
+}
+
+// nextRunText returns the next fire time for editable cron jobs.
+func (j Job) nextRunText() string {
+	if j.ReadOnly {
+		return ""
+	}
+	if !j.Enabled {
+		return "never (disabled)"
+	}
+
+	current := now()
+	next, ok := NextRun(j.Schedule, current)
+	if !ok {
+		return ""
+	}
+
+	return fmt.Sprintf("%s (in %s)", next.Format("2006-01-02 15:04"), humanDuration(next.Sub(current)))
+}
+
+func humanDuration(d time.Duration) string {
+	d = d.Round(time.Minute)
+	days, hours, minutes := int(d.Hours())/24, int(d.Hours())%24, int(d.Minutes())%60
+
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%dd %dh", days, hours)
+	case hours > 0:
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	default:
+		return fmt.Sprintf("%dm", minutes)
+	}
 }
 
 var scheduleMacros = map[string]bool{
@@ -123,6 +209,19 @@ func validSchedule(fields []string) bool {
 	return true
 }
 
+// splitDisabled strips Seer's disabled marker. Any other comment returns an
+// empty line so the caller skips it.
+func splitDisabled(line string) (rest string, enabled bool) {
+	if !strings.HasPrefix(line, "#") {
+		return line, true
+	}
+	if !strings.HasPrefix(line, DisabledMarker) {
+		return "", false
+	}
+
+	return strings.TrimSpace(strings.TrimPrefix(line, DisabledMarker)), false
+}
+
 // parseCrontabLine parses the 6-field /etc/crontab and /etc/cron.d format:
 //
 //	minute hour day-of-month month day-of-week user command
@@ -133,19 +232,7 @@ func parseCrontabLine(raw string) (
 	enabled bool,
 	ok bool,
 ) {
-	line := strings.TrimSpace(raw)
-	if line == "" {
-		return "", "", "", false, false
-	}
-
-	enabled = true
-
-	// Treat commented-out cron entries as disabled jobs.
-	if strings.HasPrefix(line, "#") {
-		enabled = false
-		line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
-	}
-
+	line, enabled := splitDisabled(strings.TrimSpace(raw))
 	if line == "" {
 		return "", "", "", false, false
 	}
@@ -182,19 +269,7 @@ func parseSpoolLine(raw string) (
 	enabled bool,
 	ok bool,
 ) {
-	line := strings.TrimSpace(raw)
-	if line == "" {
-		return "", "", false, false
-	}
-
-	enabled = true
-
-	// Treat commented-out cron entries as disabled jobs.
-	if strings.HasPrefix(line, "#") {
-		enabled = false
-		line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
-	}
-
+	line, enabled := splitDisabled(strings.TrimSpace(raw))
 	if line == "" {
 		return "", "", false, false
 	}
@@ -235,7 +310,7 @@ func takeFields(raw string, n int) (
 // parseFile reads path line by line, parsing each line as a cron job. A
 // file that can't be opened, or a line that can't be scanned, is reported
 // as a warning rather than discarding jobs already found elsewhere.
-func parseFile(path string, systemFormat bool, spoolUser string) (jobs []Job, warnings []string) {
+func parseFile(path string, systemFormat bool, spoolUser string, kind Kind) (jobs []Job, warnings []string) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, []string{fmt.Sprintf("could not read %s: %v", path, err)}
@@ -290,6 +365,7 @@ func parseFile(path string, systemFormat bool, spoolUser string) (jobs []Job, wa
 			LineNumber: lineNumber,
 			Raw:        raw,
 			Enabled:    enabled,
+			Kind:       kind,
 		})
 	}
 
@@ -351,8 +427,10 @@ func dirExists(path string) bool {
 //	/etc/cron.d
 //	/var/spool/cron
 //	/var/spool/cron/crontabs
+//	/etc/cron.{hourly,daily,weekly,monthly}
+//	/etc/anacrontab
 //
-// It parses system crontabs using the format that includes a username and
+// The periodic scripts and anacrontab entries are listed read-only. It parses system crontabs using the format that includes a username and
 // parses per-user crontabs using the format where the username comes from
 // the filename. A source it cannot read is reported as a warning rather
 // than aborting the rest of the scan. Callers are responsible for deciding
@@ -360,7 +438,7 @@ func dirExists(path string) bool {
 // but reasonably discarded during shell tab-completion.
 func ListJobs() (jobs []Job, warnings []string) {
 	if fileExists("/etc/crontab") {
-		fileJobs, fileWarnings := parseFile("/etc/crontab", true, "")
+		fileJobs, fileWarnings := parseFile("/etc/crontab", true, "", KindCrontab)
 		jobs = append(jobs, fileJobs...)
 		warnings = append(warnings, fileWarnings...)
 	}
@@ -370,7 +448,7 @@ func ListJobs() (jobs []Job, warnings []string) {
 		warnings = append(warnings, dirWarnings...)
 
 		for _, path := range files {
-			fileJobs, fileWarnings := parseFile(path, true, "")
+			fileJobs, fileWarnings := parseFile(path, true, "", KindCronD)
 			jobs = append(jobs, fileJobs...)
 			warnings = append(warnings, fileWarnings...)
 		}
@@ -401,10 +479,22 @@ func ListJobs() (jobs []Job, warnings []string) {
 
 			user := filepath.Base(path)
 
-			fileJobs, fileWarnings := parseFile(path, false, user)
+			fileJobs, fileWarnings := parseFile(path, false, user, KindUser)
 			jobs = append(jobs, fileJobs...)
 			warnings = append(warnings, fileWarnings...)
 		}
+	}
+
+	periodic, periodicWarnings := periodicJobs()
+	jobs = append(jobs, periodic...)
+	warnings = append(warnings, periodicWarnings...)
+
+	anacron, anacronWarnings := anacronJobs("/etc/anacrontab")
+	jobs = append(jobs, anacron...)
+	warnings = append(warnings, anacronWarnings...)
+
+	for i := range jobs {
+		jobs[i].Risks = jobRisks(jobs[i])
 	}
 
 	return jobs, warnings

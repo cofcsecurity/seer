@@ -14,7 +14,7 @@ func JobDisable() *cobra.Command {
 	disable := &cobra.Command{
 		Use: "disable [job-id]", Short: "Disable a scheduled cron job",
 		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeJobIDs(func(j job.Job) bool { return j.Enabled }),
+		ValidArgsFunction: completeJobIDs(func(j job.Job) bool { return !j.ReadOnly && j.Enabled }),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := findTarget(args[0])
 			if err != nil {
@@ -41,6 +41,9 @@ func findTarget(id string) (*job.Job, error) {
 	jobs, _ := job.ListJobs()
 	for _, j := range jobs {
 		if j.ID == id {
+			if j.ReadOnly {
+				return nil, fmt.Errorf("job %q comes from %s and is read-only; edit %s directly", id, j.Kind, j.Source)
+			}
 			return &j, nil
 		}
 	}

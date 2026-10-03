@@ -260,6 +260,11 @@ func findJob(id string) (Job, error) {
 	return Job{}, fmt.Errorf("job %q not found", id)
 }
 
+// errReadOnly rejects changes to jobs from sources Seer does not rewrite.
+func errReadOnly(j Job) error {
+	return fmt.Errorf("job %q comes from %s and is read-only; edit %s directly", j.ID, j.Kind, j.Source)
+}
+
 // Disable comments out job's line. Errors if the job is already disabled.
 func Disable(id string) (backupPath string, err error) {
 	target, err := findJob(id)
@@ -267,11 +272,15 @@ func Disable(id string) (backupPath string, err error) {
 		return "", err
 	}
 
+	if target.ReadOnly {
+		return "", errReadOnly(target)
+	}
+
 	if !target.Enabled {
 		return "", fmt.Errorf("job %q is already disabled", id)
 	}
 
-	replacement := "# " + target.Raw
+	replacement := DisabledMarker + " " + target.Raw
 
 	return rewriteSource(target, &replacement)
 }
@@ -283,12 +292,16 @@ func Enable(id string) (backupPath string, err error) {
 		return "", err
 	}
 
+	if target.ReadOnly {
+		return "", errReadOnly(target)
+	}
+
 	if target.Enabled {
 		return "", fmt.Errorf("job %q is already enabled", id)
 	}
 
 	line := strings.TrimSpace(target.Raw)
-	replacement := strings.TrimSpace(strings.TrimPrefix(line, "#"))
+	replacement := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, DisabledMarker), "#"))
 
 	return rewriteSource(target, &replacement)
 }
@@ -299,6 +312,10 @@ func Remove(id string) (backupPath string, err error) {
 	target, err := findJob(id)
 	if err != nil {
 		return "", err
+	}
+
+	if target.ReadOnly {
+		return "", errReadOnly(target)
 	}
 
 	return rewriteSource(target, nil)

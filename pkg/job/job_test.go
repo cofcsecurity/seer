@@ -4,7 +4,9 @@ package job
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestTakeFields(t *testing.T) {
@@ -67,7 +69,8 @@ func TestParseCrontabLine(t *testing.T) {
 	}{
 		{"valid", "* * * * * root /usr/bin/true", true, true, "* * * * *", "root", "/usr/bin/true"},
 		{"macro", "@daily root backup.sh", true, true, "@daily", "root", "backup.sh"},
-		{"disabled", "# * * * * * root /usr/bin/true", true, false, "* * * * *", "root", "/usr/bin/true"},
+		{"disabled", "#[seer-disabled] * * * * * root /usr/bin/true", true, false, "* * * * *", "root", "/usr/bin/true"},
+		{"cron-looking comment", "# 0 0 * * * root /usr/bin/true", false, false, "", "", ""},
 		{"prose comment", "# this is a much longer comment line", false, false, "", "", ""},
 		{"too few fields", "* * * * root", false, false, "", "", ""},
 		{"bad macro", "@bogus root command", false, false, "", "", ""},
@@ -100,7 +103,7 @@ func TestParseSpoolLine(t *testing.T) {
 		wantCommand  string
 	}{
 		{"valid", "*/15 * * * * backup.sh", true, true, "*/15 * * * *", "backup.sh"},
-		{"disabled", "# * * * * * backup.sh", true, false, "* * * * *", "backup.sh"},
+		{"disabled", "#[seer-disabled] * * * * * backup.sh", true, false, "* * * * *", "backup.sh"},
 		{"prose comment", "# this is a much longer comment line", false, false, "", ""},
 		{"too few fields", "* * * *", false, false, "", ""},
 	} {
@@ -137,14 +140,15 @@ func TestParseFile(t *testing.T) {
 	path := filepath.Join(dir, "crontab")
 	content := "MAILTO=root\n" +
 		"* * * * * root /usr/bin/true\n" +
-		"# 0 0 * * * root /usr/bin/false\n" +
+		"#[seer-disabled] 0 0 * * * root /usr/bin/false\n" +
+		"# 5 5 * * * root /usr/bin/documented-but-not-a-job\n" +
 		"\n" +
 		"# just a comment\n"
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	jobs, warnings := parseFile(path, true, "")
+	jobs, warnings := parseFile(path, true, "", KindCronD)
 	if len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
@@ -160,7 +164,7 @@ func TestParseFile(t *testing.T) {
 }
 
 func TestParseFileMissingReportsWarning(t *testing.T) {
-	jobs, warnings := parseFile(filepath.Join(t.TempDir(), "missing"), true, "")
+	jobs, warnings := parseFile(filepath.Join(t.TempDir(), "missing"), true, "", KindCronD)
 	if jobs != nil {
 		t.Fatalf("expected no jobs, got %+v", jobs)
 	}
@@ -225,7 +229,7 @@ func TestNamedFieldsAndDuplicateIDs(t *testing.T) {
 	if err := os.WriteFile(path, []byte(line+line), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	jobs, _ := parseFile(path, false, "u")
+	jobs, _ := parseFile(path, false, "u", KindUser)
 	if len(jobs) != 2 || jobs[0].ID == jobs[1].ID {
 		t.Fatalf("duplicate lines must get distinct IDs, got %+v", jobs)
 	}
@@ -245,5 +249,101 @@ func TestScheduleRole(t *testing.T) {
 	}
 	if (Job{User: "root"}).UserRole() != RoleUserRoot {
 		t.Error("root should be RoleUserRoot")
+	}
+}
+
+func TestNextRun(t *testing.T) {
+	from := time.Date(2026, 10, 3, 10, 7, 30, 0, time.UTC) // a Saturday
+	for schedule, want := range map[string]string{
+		"30 9 * * *":      "2026-10-04 09:30",
+		"*/15 * * * *":    "2026-10-03 10:15",
+		"0 0 1 * *":       "2026-11-01 00:00",
+		"0 9 * * mon-fri": "2026-10-05 09:00",
+		"0 0 29 2 *":      "2028-02-29 00:00",
+		"@hourly":         "2026-10-03 11:00",
+		"@weekly":         "2026-10-04 00:00",
+		"0 0 1 1 *":       "2027-01-01 00:00",
+		"0 0 */2 * 1":     "2026-10-05 00:00", // star-prefixed field: AND, not OR
+		"0 0 1 * 1":       "2026-10-05 00:00", // restricted both: OR
+		"0 0 * * 7":       "2026-10-04 00:00",
+	} {
+		got, ok := NextRun(schedule, from)
+		if !ok || got.Format("2006-01-02 15:04") != want {
+			t.Errorf("NextRun(%q) = %v, %t, want %s", schedule, got, ok, want)
+		}
+	}
+	for _, schedule := range []string{"@reboot", "@every-3d", "bogus", "0 0 31 2 *", "61 * * * *"} {
+		if _, ok := NextRun(schedule, from); ok {
+			t.Errorf("NextRun(%q) should not resolve", schedule)
+		}
+	}
+}
+
+func TestAnacronAndPeriodic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "anacrontab")
+	content := "SHELL=/bin/sh\n1 5 cron.daily run-parts /etc/cron.daily\n3 10 odd /opt/odd.sh\n@monthly 45 m /opt/m.sh\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jobs, warnings := anacronJobs(path)
+	if len(warnings) != 0 || len(jobs) != 3 {
+		t.Fatalf("got %+v, %v", jobs, warnings)
+	}
+	if jobs[0].Schedule != "@daily" || jobs[1].Schedule != "@every-3d" || jobs[2].Schedule != "@monthly" {
+		t.Fatalf("unexpected schedules: %+v", jobs)
+	}
+	for _, j := range jobs {
+		if !j.ReadOnly || j.User != "root" || j.Kind != KindAnacron {
+			t.Fatalf("anacron job not read-only root: %+v", j)
+		}
+	}
+	if got := DescribeSchedule("@every-3d"); got != "Every 3 days (anacron)" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestJobRisks(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "run.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(script, 0o777); err != nil {
+		t.Fatal(err)
+	}
+
+	risky := Job{User: "root", Enabled: true, Command: "FOO=1 " + script + " --arg"}
+	if len(jobRisks(risky)) == 0 {
+		t.Fatal("writable script run by root should be flagged")
+	}
+	if got := jobRisks(Job{User: "root", Enabled: true, Command: "/tmp/x.sh"}); len(got) == 0 {
+		t.Fatal("temp directory command should be flagged")
+	}
+	if jobRisks(Job{User: "root", Enabled: false, Command: script}) != nil {
+		t.Fatal("disabled jobs are not flagged")
+	}
+	if jobRisks(Job{User: "alice", Enabled: true, Command: script}) != nil {
+		t.Fatal("non-root jobs are not flagged")
+	}
+	if jobRisks(Job{User: "root", Enabled: true, Command: "backup --now"}) != nil {
+		t.Fatal("PATH-resolved commands are not checked")
+	}
+}
+
+func TestDescribeShowsNextRunAndRisk(t *testing.T) {
+	now = func() time.Time { return time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC) }
+	defer func() { now = time.Now }()
+
+	j := Job{ID: "x", Source: "/etc/crontab", User: "root", Schedule: "30 11 * * *",
+		Command: "/tmp/a.sh", LineNumber: 1, Raw: "r", Enabled: true, Kind: KindCrontab,
+		Risks: []string{"runs from temporary directory /tmp"}}
+	got := j.Describe()
+	for _, want := range []string{"├ Type: crontab", "├ Next run: 2026-10-03 11:30 (in 1h 30m)", "├ Risk: runs from temporary directory /tmp"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Describe() missing %q in:\n%s", want, got)
+		}
+	}
+	if !strings.Contains(j.String(), "[RISK]") {
+		t.Error("String() should show [RISK]")
 	}
 }
