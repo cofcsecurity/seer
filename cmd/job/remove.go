@@ -12,7 +12,7 @@ import (
 func JobRemove() *cobra.Command {
 	var yes, preview bool
 	remove := &cobra.Command{
-		Use: "remove [job-id]", Short: "Permanently remove a scheduled cron job",
+		Use: "remove [job-id]", Short: "Remove a scheduled cron job (undo with job restore)",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeJobIDs(func(j job.Job) bool { return !j.ReadOnly }),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -33,7 +33,7 @@ func JobRemove() *cobra.Command {
 				fmt.Fprint(cmd.OutOrStdout(), legend(true))
 			}
 			fmt.Fprint(cmd.OutOrStdout(), jobOutput(*target, true, color))
-			fmt.Fprintln(cmd.OutOrStdout(), paint("This deletes the line from its source file. A backup is kept, but the CLI cannot undo this.", ansiYellow, terminalColor(cmd.OutOrStdout())))
+			fmt.Fprintln(cmd.OutOrStdout(), paint("This deletes the line from its source file. A backup is kept; undo with 'seer job restore'.", ansiYellow, terminalColor(cmd.OutOrStdout())))
 			if !yes && !utils.Confirm() {
 				fmt.Fprintln(cmd.OutOrStdout(), "Canceled.")
 				return nil
@@ -42,7 +42,7 @@ func JobRemove() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), paint("Job removed. Backup saved to "+backup, ansiCyan, terminalColor(cmd.OutOrStdout())))
+			fmt.Fprintln(cmd.OutOrStdout(), paint("Job removed. Undo with: seer job restore "+job.BackupID(backup), ansiCyan, terminalColor(cmd.OutOrStdout())))
 			return nil
 		},
 	}

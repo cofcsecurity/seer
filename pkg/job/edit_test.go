@@ -70,7 +70,7 @@ func TestLocateLineRejectsNonRegular(t *testing.T) {
 func TestWriteBackup(t *testing.T) {
 	dir := t.TempDir()
 	data := []byte("original content\n")
-	backupPath, err := writeBackup(dir, data)
+	backupPath, err := writeBackup(dir, "crontab", "test", data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestRewriteSourceDisableAndRemove(t *testing.T) {
 
 	target := Job{Source: path, LineNumber: 2, Raw: "* * * * * root /usr/bin/true"}
 	replacement := DisabledMarker + " * * * * * root /usr/bin/true"
-	backup, err := rewriteSource(target, &replacement)
+	backup, err := rewriteSource(OpDisable, target, &replacement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestRewriteSourceDisableAndRemove(t *testing.T) {
 
 	// Now remove the second job entirely.
 	target2 := Job{Source: path, LineNumber: 3, Raw: "0 0 * * * root /usr/bin/false"}
-	if _, err := rewriteSource(target2, nil); err != nil {
+	if _, err := rewriteSource(OpRemove, target2, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err = os.ReadFile(path)
@@ -181,7 +181,7 @@ func TestRewriteSourceStaleJobFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := Job{Source: path, LineNumber: 1, Raw: "* * * * * root /usr/bin/gone"}
-	if _, err := rewriteSource(target, nil); err == nil {
+	if _, err := rewriteSource(OpRemove, target, nil); err == nil {
 		t.Fatal("expected error for a job that no longer matches")
 	}
 	got, err := os.ReadFile(path)

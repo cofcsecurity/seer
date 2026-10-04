@@ -193,6 +193,26 @@ var scheduleFieldPattern = regexp.MustCompile(
 		`(,(\*|[0-9]+|[a-z]{3})(-([0-9]+|[a-z]{3}))?(/[0-9]+)?)*$`,
 )
 
+// Scanned locations. They are variables so tests can point them at temp dirs.
+var (
+	crontabPath    = "/etc/crontab"
+	cronDDir       = "/etc/cron.d"
+	anacrontabPath = "/etc/anacrontab"
+	spoolRoots     = []string{"/var/spool/cron", "/var/spool/cron/crontabs"}
+)
+
+// idText is the text a job's ID is derived from: the line with any Seer
+// disabled marker removed, so a job keeps the same ID when it is disabled and
+// enabled again.
+func idText(raw string) string {
+	line := strings.TrimSpace(raw)
+	if rest, ok := strings.CutPrefix(line, DisabledMarker); ok {
+		line = strings.TrimSpace(rest)
+	}
+
+	return line
+}
+
 func jobID(source, raw string) string {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(source + raw))
@@ -355,11 +375,12 @@ func parseFile(path string, systemFormat bool, spoolUser string, kind Kind) (job
 
 		// Identical lines in one file would otherwise share an ID, making
 		// the second one unreachable by enable/disable/remove.
-		id := jobID(path, raw)
+		key := idText(raw)
+		id := jobID(path, key)
 		if n := seen[id]; n > 0 {
-			id = jobID(path, fmt.Sprintf("%s\x00%d", raw, n))
+			id = jobID(path, fmt.Sprintf("%s\x00%d", key, n))
 		}
-		seen[jobID(path, raw)]++
+		seen[jobID(path, key)]++
 
 		jobs = append(jobs, Job{
 			ID:         id,
@@ -401,7 +422,9 @@ func regularFiles(root string) (files []string, warnings []string) {
 			return nil
 		}
 
-		if info.Mode().IsRegular() {
+		// Seer's own backups and staging files live beside the source files
+		// and must not be mistaken for crontabs.
+		if info.Mode().IsRegular() && !strings.HasPrefix(entry.Name(), ".seer-job-") {
 			files = append(files, path)
 		}
 
@@ -442,14 +465,14 @@ func dirExists(path string) bool {
 // how to surface returned warnings — e.g. printed to the user in `list`,
 // but reasonably discarded during shell tab-completion.
 func ListJobs() (jobs []Job, warnings []string) {
-	if fileExists("/etc/crontab") {
-		fileJobs, fileWarnings := parseFile("/etc/crontab", true, "", KindCrontab)
+	if fileExists(crontabPath) {
+		fileJobs, fileWarnings := parseFile(crontabPath, true, "", KindCrontab)
 		jobs = append(jobs, fileJobs...)
 		warnings = append(warnings, fileWarnings...)
 	}
 
-	if dirExists("/etc/cron.d") {
-		files, dirWarnings := regularFiles("/etc/cron.d")
+	if dirExists(cronDDir) {
+		files, dirWarnings := regularFiles(cronDDir)
 		warnings = append(warnings, dirWarnings...)
 
 		for _, path := range files {
@@ -466,13 +489,8 @@ func ListJobs() (jobs []Job, warnings []string) {
 		}
 	}
 
-	// Use both common spool locations, but deduplicate paths because
-	// /var/spool/cron/crontabs may be nested below /var/spool/cron.
-	spoolRoots := []string{
-		"/var/spool/cron",
-		"/var/spool/cron/crontabs",
-	}
-
+	// Both common spool locations are scanned, with paths deduplicated
+	// because /var/spool/cron/crontabs may be nested below /var/spool/cron.
 	seenFiles := make(map[string]bool)
 
 	for _, root := range spoolRoots {
@@ -501,7 +519,7 @@ func ListJobs() (jobs []Job, warnings []string) {
 	jobs = append(jobs, periodic...)
 	warnings = append(warnings, periodicWarnings...)
 
-	anacron, anacronWarnings := anacronJobs("/etc/anacrontab")
+	anacron, anacronWarnings := anacronJobs(anacrontabPath)
 	jobs = append(jobs, anacron...)
 	warnings = append(warnings, anacronWarnings...)
 

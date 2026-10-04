@@ -12,5 +12,8 @@ func Job() *cobra.Command {
 	job.AddCommand(JobDisable())
 	job.AddCommand(JobEnable())
 	job.AddCommand(JobRemove())
+	job.AddCommand(JobBackups())
+	job.AddCommand(JobRestore())
+	job.AddCommand(JobCleanup())
 	return job
 }

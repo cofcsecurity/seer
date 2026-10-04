@@ -68,9 +68,12 @@ func locateLine(path string, lineNumber int, expected string) (
 	)
 }
 
-// writeBackup saves data to a new, synced temp file in dir in case edit fails.
-func writeBackup(dir string, data []byte) (backupPath string, err error) {
-	backup, err := os.CreateTemp(dir, ".seer-job-backup-*")
+// writeBackup saves data to a new, synced file in dir in case the edit fails
+// or needs undoing. The name records the operation and the file it protects
+// (".seer-job-backup-<op>-<file>-<random>") so backups can be listed and
+// restored later.
+func writeBackup(dir, base, op string, data []byte) (backupPath string, err error) {
+	backup, err := os.CreateTemp(dir, backupPrefix+op+"-"+base+"-*")
 	if err != nil {
 		return "", err
 	}
@@ -190,7 +193,7 @@ func commitReplacement(
 // original, stages the replacement, and commits it.
 //
 // A nil replacement removes the matching line.
-func rewriteSource(job Job, replacement *string) (backupPath string, err error) {
+func rewriteSource(op Operation, job Job, replacement *string) (backupPath string, err error) {
 	lines, index, info, err := locateLine(job.Source, job.LineNumber, job.Raw)
 	if err != nil {
 		return "", err
@@ -207,10 +210,21 @@ func rewriteSource(job Job, replacement *string) (backupPath string, err error) 
 	content := []byte(strings.Join(lines, ""))
 	dir := filepath.Dir(job.Source)
 
-	backupPath, err = writeBackup(dir, original)
+	backupPath, err = writeBackup(dir, filepath.Base(job.Source), string(op), original)
 	if err != nil {
 		return "", fmt.Errorf("could not create backup: %w", err)
 	}
+
+	meta := fileMeta(info)
+	meta.Targeted, meta.Line, meta.HasOld, meta.Old = true, index+1, true, job.Raw
+	if index > 0 {
+		meta.Before = strings.TrimRight(lines[index-1], "\r\n")
+	}
+	if replacement != nil {
+		meta.HasNew, meta.New = true, *replacement
+	}
+	// Best effort: without the sidecar, restore falls back to the whole file.
+	_ = writeMeta(backupPath, meta)
 
 	tmpPath, err := writeReplacement(dir, job.Source, info, content)
 	if err != nil {
@@ -267,6 +281,7 @@ const (
 	OpDisable Operation = "disable"
 	OpEnable  Operation = "enable"
 	OpRemove  Operation = "remove"
+	OpRestore Operation = "restore"
 )
 
 // plan finds the job and returns it with its replacement line (nil removes
@@ -313,7 +328,7 @@ func Apply(op Operation, id string) (backupPath string, err error) {
 		return "", err
 	}
 
-	return rewriteSource(target, replacement)
+	return rewriteSource(op, target, replacement)
 }
 
 // Diff shows what Apply would change, without touching any file. The output

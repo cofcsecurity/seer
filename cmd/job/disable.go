@@ -41,7 +41,7 @@ func JobDisable() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), paint("Job disabled. Backup saved to "+backup, ansiCyan, terminalColor(cmd.OutOrStdout())))
+			fmt.Fprintln(cmd.OutOrStdout(), paint("Job disabled. Undo with: seer job restore "+job.BackupID(backup), ansiCyan, terminalColor(cmd.OutOrStdout())))
 			return nil
 		},
 	}
