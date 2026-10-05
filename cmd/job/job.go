@@ -9,9 +9,12 @@ func Job() *cobra.Command {
 	}
 	job.AddCommand(JobList())
 	job.AddCommand(JobDescribe())
+	job.AddCommand(JobAdd())
 	job.AddCommand(JobDisable())
 	job.AddCommand(JobEnable())
 	job.AddCommand(JobRemove())
+	job.AddCommand(JobCheck())
+	job.AddCommand(JobHistory())
 	job.AddCommand(JobBackups())
 	job.AddCommand(JobRestore())
 	job.AddCommand(JobCleanup())

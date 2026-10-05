@@ -1,6 +1,7 @@
 package job
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,10 +25,17 @@ func useTempCron(t *testing.T) (crontab, cronD, spool string) {
 	}
 
 	oldCrontab, oldCronD, oldAnacron, oldSpool, oldPeriodic := crontabPath, cronDDir, anacrontabPath, spoolRoots, periodicDirs
+	oldSystemd, oldAt, oldAllow, oldDeny, oldLogs, oldRun := systemdDirs, atSpoolDirs, cronAllowPath, cronDenyPath, logFiles, runCommand
 	crontabPath, cronDDir, anacrontabPath, spoolRoots = crontab, cronD, filepath.Join(root, "anacrontab"), []string{spool}
 	periodicDirs = nil
+	systemdDirs = []string{filepath.Join(root, "systemd")}
+	atSpoolDirs = []string{filepath.Join(spool, "atjobs")}
+	cronAllowPath, cronDenyPath = filepath.Join(root, "cron.allow"), filepath.Join(root, "cron.deny")
+	logFiles = nil
+	runCommand = func(string, ...string) ([]byte, error) { return nil, fmt.Errorf("no commands in tests") }
 	t.Cleanup(func() {
 		crontabPath, cronDDir, anacrontabPath, spoolRoots, periodicDirs = oldCrontab, oldCronD, oldAnacron, oldSpool, oldPeriodic
+		systemdDirs, atSpoolDirs, cronAllowPath, cronDenyPath, logFiles, runCommand = oldSystemd, oldAt, oldAllow, oldDeny, oldLogs, oldRun
 	})
 
 	return crontab, cronD, spool

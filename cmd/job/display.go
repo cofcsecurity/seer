@@ -87,8 +87,9 @@ func legend(color bool) string {
 	}
 	a := style.Apply
 	return "Owner:  " + a(job.RoleUserRoot, "root") + "  " + a(job.RoleUserRegular, "user") + "  system\n" +
-		"Marks:  " + a(job.RoleFrequent, "frequent") + "  " + a(job.RoleDisabled, "[DISABLED]") + "  " +
-		a(job.RoleRisk, "[RISK]") + " tamperable  " + "[periodic] [anacron]" + " read-only\n\n"
+		"Marks:  " + a(job.RoleFrequent, "frequent") + "  " + a(job.RoleDisabled, "[DISABLED] [DENIED]") + "  " +
+		a(job.RoleFrequent, "[RECENT]") + " changed lately  " + a(job.RoleRisk, "[RISK]") + " tamperable\n" +
+		"Types:  [timer] systemd  [at] one-time  [periodic] [anacron] read-only\n\n"
 }
 
 // colorDiff colors removed lines red and added lines green.
@@ -108,4 +109,13 @@ func colorDiff(text string, color bool) string {
 		}
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// undoHint returns the command that reverses a change. Cron edits are
+// undone from their backup; systemd timers by the opposite verb.
+func undoHint(t job.Job, inverse, backup string) string {
+	if t.Kind == job.KindTimer {
+		return "seer job " + inverse + " " + t.ID
+	}
+	return "seer job restore " + job.BackupID(backup)
 }

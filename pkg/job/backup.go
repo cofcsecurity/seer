@@ -37,7 +37,8 @@ type Meta struct {
 	HasOld   bool   `json:"has_old"`
 	Old      string `json:"old"` // the line before the change
 	HasNew   bool   `json:"has_new"`
-	New      string `json:"new"` // the line after the change; absent for remove
+	New      string `json:"new"`     // the line after the change; absent for remove
+	Created  bool   `json:"created"` // the change created the file
 	Mode     uint32 `json:"mode"`
 	UID      int    `json:"uid"`
 	GID      int    `json:"gid"`
@@ -397,6 +398,11 @@ func Restore(id string, wholeFile bool) (undoPath string, err error) {
 	if err := commitReplacement(source, p.info, p.current, tmpPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return undoPath, err
+	}
+
+	// Undoing an add that created the file leaves nothing behind.
+	if p.backup.Meta != nil && p.backup.Meta.Created && strings.TrimSpace(string(p.content)) == "" {
+		_ = os.Remove(source)
 	}
 
 	return undoPath, nil

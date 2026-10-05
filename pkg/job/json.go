@@ -22,6 +22,11 @@ type jsonJob struct {
 	ReadOnly    bool     `json:"read_only"`
 	Note        string   `json:"note,omitempty"`
 	Risks       []string `json:"risks"`
+	Unit        string   `json:"unit,omitempty"`
+	Env         []string `json:"env,omitempty"`
+	Modified    string   `json:"modified,omitempty"`
+	Recent      bool     `json:"recent"`
+	Denied      bool     `json:"denied,omitempty"`
 }
 
 // MarshalJSON gives scripts the same derived fields the text output shows.
@@ -34,13 +39,16 @@ func (j Job) MarshalJSON() ([]byte, error) {
 		Description: j.humanSchedule(),
 		Command:     j.Command, Raw: j.Raw,
 		Enabled: j.Enabled, ReadOnly: j.ReadOnly, Note: j.Note,
-		Risks: j.Risks,
+		Risks: j.Risks, Unit: j.Unit, Env: j.Env, Recent: j.IsRecent(), Denied: j.Denied,
+	}
+	if !j.Modified.IsZero() {
+		out.Modified = j.Modified.Format(time.RFC3339)
 	}
 	if out.Risks == nil {
 		out.Risks = []string{}
 	}
 
-	if j.Enabled && !j.ReadOnly {
+	if j.Enabled && !j.ReadOnly && j.Kind != KindTimer {
 		if next, ok := NextRun(j.Schedule, now()); ok {
 			out.NextRun = next.Format(time.RFC3339)
 		}

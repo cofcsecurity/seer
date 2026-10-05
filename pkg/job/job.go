@@ -22,8 +22,20 @@ type Job struct {
 	LineNumber int
 	Raw        string
 	Enabled    bool
-	// Kind is the source type: crontab, cron.d, user, periodic, or anacron.
+	// Kind is the source type: crontab, cron.d, user, periodic, anacron,
+	// timer, or at.
 	Kind Kind
+	// Unit names the systemd service a timer starts, or the anacron job ID.
+	Unit string
+	// Service is the service unit a timer starts.
+	Service string
+	// Modified is when the source file last changed.
+	Modified time.Time
+	// Env holds the NAME=value lines that apply to the job.
+	Env []string
+	// Denied is set when cron.allow or cron.deny bars the owner of a user
+	// crontab, which cron may then skip.
+	Denied bool
 	// ReadOnly jobs come from sources Seer lists but does not rewrite.
 	ReadOnly bool
 	// Note explains why a job is inactive or read-only, when it is.
@@ -40,6 +52,8 @@ const (
 	KindUser     Kind = "user"
 	KindPeriodic Kind = "periodic"
 	KindAnacron  Kind = "anacron"
+	KindTimer    Kind = "timer"
+	KindAt       Kind = "at"
 )
 
 // DisabledMarker prefixes a line that Seer commented out. Only lines
@@ -68,8 +82,16 @@ func (j Job) StringStyled(style Style) string {
 		risk = " " + style.apply(RoleRisk, "[RISK]")
 	}
 
-	if j.ReadOnly {
-		risk += " " + style.apply(RoleReadOnly, "["+string(j.Kind)+"]")
+	if j.Denied {
+		risk += " " + style.apply(RoleDisabled, "[DENIED]")
+	}
+
+	if j.IsRecent() {
+		risk += " " + style.apply(RoleFrequent, "[RECENT]")
+	}
+
+	if tag := j.kindTag(); tag != "" {
+		risk += " " + style.apply(RoleReadOnly, tag)
 	}
 
 	return fmt.Sprintf("[%s] %s %s %s%s\n",
@@ -112,7 +134,20 @@ func (j Job) DescribeStyled(style Style) string {
 	if next := j.nextRunText(); next != "" {
 		fmt.Fprintf(&b, "├ Next run: %s\n", next)
 	}
+	if last := j.lastRunText(); last != "" {
+		fmt.Fprintf(&b, "├ Last run: %s\n", last)
+	}
 	fmt.Fprintf(&b, "├ Command: %s\n", style.apply(RoleCommand, j.Command))
+	for _, e := range j.Env {
+		fmt.Fprintf(&b, "├ Env: %s\n", e)
+	}
+	if !j.Modified.IsZero() {
+		recent := ""
+		if j.IsRecent() {
+			recent = " " + style.apply(RoleFrequent, "[RECENT]")
+		}
+		fmt.Fprintf(&b, "├ Modified: %s (%s ago)%s\n", j.Modified.Format("2006-01-02 15:04"), humanDuration(now().Sub(j.Modified)), recent)
+	}
 	if j.Note != "" {
 		fmt.Fprintf(&b, "├ Note: %s\n", j.Note)
 	}
@@ -129,6 +164,13 @@ var now = time.Now
 // humanSchedule explains the schedule in words. Periodic scripts run at a
 // time chosen by cron or anacron, so no clock time is claimed for them.
 func (j Job) humanSchedule() string {
+	switch j.Kind {
+	case KindTimer:
+		return ""
+	case KindAt:
+		return "runs once"
+	}
+
 	if j.Kind == KindPeriodic {
 		return "run via run-parts " + strings.TrimPrefix(j.Schedule, "@") + "; exact time set by cron or anacron"
 	}
@@ -138,6 +180,23 @@ func (j Job) humanSchedule() string {
 
 // nextRunText returns the next fire time for editable cron jobs.
 func (j Job) nextRunText() string {
+	switch j.Kind {
+	case KindTimer:
+		if next := TimerStatus(j)["NextElapseUSecRealtime"]; next != "" {
+			return next
+		}
+		return ""
+	case KindAt:
+		runAt, err := time.ParseInLocation("2006-01-02 15:04", strings.TrimPrefix(j.Schedule, "at "), time.Local)
+		if err != nil {
+			return ""
+		}
+		if runAt.Before(now()) {
+			return runAt.Format("2006-01-02 15:04") + " (due now)"
+		}
+		return fmt.Sprintf("%s (in %s)", runAt.Format("2006-01-02 15:04"), humanDuration(runAt.Sub(now())))
+	}
+
 	if j.ReadOnly {
 		return ""
 	}
@@ -152,6 +211,35 @@ func (j Job) nextRunText() string {
 	}
 
 	return fmt.Sprintf("%s (in %s)", next.Format("2006-01-02 15:04"), humanDuration(next.Sub(current)))
+}
+
+// lastRunText reports a timer's last trigger, when systemd knows it.
+func (j Job) lastRunText() string {
+	if j.Kind != KindTimer {
+		return ""
+	}
+
+	return TimerStatus(j)["LastTriggerUSec"]
+}
+
+// RecentWindow is how long after a change a job counts as recently modified.
+var RecentWindow = 24 * time.Hour
+
+// IsRecent reports whether the job's source changed within RecentWindow.
+// The granularity is the whole file, so editing any line marks every job in
+// it.
+func (j Job) IsRecent() bool {
+	return !j.Modified.IsZero() && now().Sub(j.Modified) < RecentWindow
+}
+
+// kindTag labels sources that behave differently from editable cron lines.
+func (j Job) kindTag() string {
+	switch j.Kind {
+	case KindPeriodic, KindAnacron, KindAt, KindTimer:
+		return "[" + string(j.Kind) + "]"
+	}
+
+	return ""
 }
 
 func humanDuration(d time.Duration) string {
@@ -347,12 +435,22 @@ func parseFile(path string, systemFormat bool, spoolUser string, kind Kind) (job
 	// Increase the default scanner limit for long cron commands.
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
 
+	var modified time.Time
+	if info, err := file.Stat(); err == nil {
+		modified = info.ModTime()
+	}
+
 	lineNumber := 0
 	seen := make(map[string]int)
+	env := newEnvList()
 
 	for scanner.Scan() {
 		lineNumber++
 		raw := scanner.Text()
+
+		if env.add(raw) {
+			continue
+		}
 
 		var (
 			schedule string
@@ -392,6 +490,8 @@ func parseFile(path string, systemFormat bool, spoolUser string, kind Kind) (job
 			Raw:        raw,
 			Enabled:    enabled,
 			Kind:       kind,
+			Modified:   modified,
+			Env:        env.list(),
 		})
 	}
 
@@ -400,6 +500,47 @@ func parseFile(path string, systemFormat bool, spoolUser string, kind Kind) (job
 	}
 
 	return jobs, warnings
+}
+
+var envLine = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\s*=`)
+
+// envList tracks NAME=value assignments in a crontab. Cron applies each one
+// to the job lines below it, and a later assignment replaces an earlier one.
+type envList struct {
+	order  []string
+	values map[string]string
+}
+
+func newEnvList() *envList { return &envList{values: map[string]string{}} }
+
+// add records raw if it is an assignment and reports whether it was one.
+func (e *envList) add(raw string) bool {
+	line := strings.TrimSpace(raw)
+	if !envLine.MatchString(line) {
+		return false
+	}
+
+	name, value, _ := strings.Cut(line, "=")
+	name = strings.TrimSpace(name)
+	if _, seen := e.values[name]; !seen {
+		e.order = append(e.order, name)
+	}
+	e.values[name] = strings.TrimSpace(value)
+
+	return true
+}
+
+func (e *envList) list() []string {
+	if len(e.order) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(e.order))
+	for _, name := range e.order {
+		out = append(out, name+"="+e.values[name])
+	}
+
+	return out
 }
 
 // regularFiles recursively returns the paths of all regular files below
@@ -502,7 +643,7 @@ func ListJobs() (jobs []Job, warnings []string) {
 		warnings = append(warnings, dirWarnings...)
 
 		for _, path := range files {
-			if seenFiles[path] {
+			if seenFiles[path] || isAtPath(path) || filepath.Base(path) == ".SEQ" {
 				continue
 			}
 			seenFiles[path] = true
@@ -523,7 +664,20 @@ func ListJobs() (jobs []Job, warnings []string) {
 	jobs = append(jobs, anacron...)
 	warnings = append(warnings, anacronWarnings...)
 
+	timers, timerWarnings := timerJobs()
+	jobs = append(jobs, timers...)
+	warnings = append(warnings, timerWarnings...)
+
+	at, atWarnings := atJobs()
+	jobs = append(jobs, at...)
+	warnings = append(warnings, atWarnings...)
+
+	access := loadCronAccess()
 	for i := range jobs {
+		if jobs[i].Kind == KindUser && access.denies(jobs[i].User) {
+			jobs[i].Denied = true
+			jobs[i].Note = access.reason
+		}
 		jobs[i].Risks = jobRisks(jobs[i])
 	}
 

@@ -91,6 +91,16 @@ func isMacUser(uid int) bool {
 // ScheduleRole classifies the schedule: @reboot, other @macros, jobs that
 // run every minute or every few minutes, and ordinary fixed schedules.
 func (j Job) ScheduleRole() Role {
+	switch j.Kind {
+	case KindTimer:
+		if timerFrequent(j.Schedule) {
+			return RoleFrequent
+		}
+		return RoleStandard
+	case KindAt:
+		return RoleStandard
+	}
+
 	fields := strings.Fields(j.Schedule)
 	switch {
 	case len(fields) == 1 && fields[0] == "@reboot":

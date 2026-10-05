@@ -41,7 +41,7 @@ func JobDisable() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), paint("Job disabled. Undo with: seer job restore "+job.BackupID(backup), ansiCyan, terminalColor(cmd.OutOrStdout())))
+			fmt.Fprintln(cmd.OutOrStdout(), paint("Job disabled. Undo with: "+undoHint(*target, "enable", backup), ansiCyan, terminalColor(cmd.OutOrStdout())))
 			return nil
 		},
 	}
@@ -55,7 +55,11 @@ func findTarget(id string) (*job.Job, error) {
 	for _, j := range jobs {
 		if j.ID == id {
 			if j.ReadOnly {
-				return nil, fmt.Errorf("job %q comes from %s and is read-only; edit %s directly", id, j.Kind, j.Source)
+				msg := fmt.Sprintf("job %q comes from %s and is read-only; edit %s directly", id, j.Kind, j.Source)
+				if j.Note != "" {
+					msg += " (" + j.Note + ")"
+				}
+				return nil, fmt.Errorf("%s", msg)
 			}
 			return &j, nil
 		}

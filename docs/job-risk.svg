@@ -1,17 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="392" viewBox="0 0 760 392" role="img" aria-label="Terminal showing a color key above a risky root cron job described entirely in red">
-  <rect width="760" height="392" rx="8" fill="#161b22"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="476" viewBox="0 0 900 476" role="img" aria-label="Terminal showing a color key above a risky root cron job described entirely in red">
+  <rect width="900" height="476" rx="8" fill="#161b22"/>
   <g font-family="monospace" font-size="15" xml:space="preserve">
     <text x="20" y="32"><tspan fill="#8b949e">root@system:/# seer job describe a1b2c3d4e5f60718</tspan></text>
     <text x="20" y="60"><tspan fill="#c9d1d9">Owner:  </tspan><tspan fill="#ffffff" font-weight="bold">root</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#56d4dd">user</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#c9d1d9">system</tspan></text>
-    <text x="20" y="88"><tspan fill="#c9d1d9">Marks:  </tspan><tspan fill="#f2cc60">frequent</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#f2cc60">[DISABLED]</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#ff6b6b">[RISK]</tspan><tspan fill="#c9d1d9"> tamperable  </tspan><tspan fill="#c9d1d9">[periodic] [anacron]</tspan><tspan fill="#c9d1d9"> read-only</tspan></text>
-    <text x="20" y="144"><tspan fill="#ff6b6b">┌ a1b2c3d4e5f60718</tspan></text>
-    <text x="20" y="172"><tspan fill="#ff6b6b">├ Type: crontab</tspan></text>
-    <text x="20" y="200"><tspan fill="#ff6b6b">├ Source: /etc/crontab (line 12)</tspan></text>
-    <text x="20" y="228"><tspan fill="#ff6b6b">├ User: root</tspan></text>
-    <text x="20" y="256"><tspan fill="#ff6b6b">├ Schedule: 30 2 * * 1-5 (At 02:30 on Monday through Friday)</tspan></text>
-    <text x="20" y="284"><tspan fill="#ff6b6b">├ Next run: 2026-10-05 02:30 (in 1d 16h)</tspan></text>
-    <text x="20" y="312"><tspan fill="#ff6b6b">├ Command: /tmp/backup.sh</tspan></text>
-    <text x="20" y="340"><tspan fill="#ff6b6b">├ Risk: runs from temporary directory /tmp</tspan></text>
-    <text x="20" y="368"><tspan fill="#ff6b6b">└ Raw: 30 2 * * 1-5 root /tmp/backup.sh</tspan></text>
+    <text x="20" y="88"><tspan fill="#c9d1d9">Marks:  </tspan><tspan fill="#f2cc60">frequent</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#f2cc60">[DISABLED] [DENIED]</tspan><tspan fill="#c9d1d9">  </tspan><tspan fill="#f2cc60">[RECENT]</tspan><tspan fill="#c9d1d9"> changed lately  </tspan><tspan fill="#ff6b6b">[RISK]</tspan><tspan fill="#c9d1d9"> tamperable</tspan></text>
+    <text x="20" y="116"><tspan fill="#c9d1d9">Types:  [timer] systemd  [at] one-time  [periodic] [anacron] read-only</tspan></text>
+    <text x="20" y="172"><tspan fill="#ff6b6b">┌ a1b2c3d4e5f60718</tspan></text>
+    <text x="20" y="200"><tspan fill="#ff6b6b">├ Type: crontab</tspan></text>
+    <text x="20" y="228"><tspan fill="#ff6b6b">├ Source: /etc/crontab (line 12)</tspan></text>
+    <text x="20" y="256"><tspan fill="#ff6b6b">├ User: root</tspan></text>
+    <text x="20" y="284"><tspan fill="#ff6b6b">├ Schedule: 30 2 * * 1-5 (At 02:30 on Monday through Friday)</tspan></text>
+    <text x="20" y="312"><tspan fill="#ff6b6b">├ Next run: 2026-10-05 02:30 (in 1d 16h)</tspan></text>
+    <text x="20" y="340"><tspan fill="#ff6b6b">├ Env: MAILTO=ops</tspan></text>
+    <text x="20" y="368"><tspan fill="#ff6b6b">├ Command: /tmp/backup.sh</tspan></text>
+    <text x="20" y="396"><tspan fill="#ff6b6b">├ Modified: 2026-10-04 13:41 (3h 20m ago) [RECENT]</tspan></text>
+    <text x="20" y="424"><tspan fill="#ff6b6b">├ Risk: runs from temporary directory /tmp</tspan></text>
+    <text x="20" y="452"><tspan fill="#ff6b6b">└ Raw: 30 2 * * 1-5 root /tmp/backup.sh</tspan></text>
   </g>
 </svg>

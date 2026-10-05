@@ -282,6 +282,7 @@ const (
 	OpEnable  Operation = "enable"
 	OpRemove  Operation = "remove"
 	OpRestore Operation = "restore"
+	OpAdd     Operation = "add"
 )
 
 // plan finds the job and returns it with its replacement line (nil removes
@@ -291,6 +292,12 @@ func plan(op Operation, id string) (target Job, replacement *string, err error) 
 	if err != nil {
 		return Job{}, nil, err
 	}
+
+	return planFor(op, target)
+}
+
+func planFor(op Operation, target Job) (Job, *string, error) {
+	id := target.ID
 
 	if target.ReadOnly {
 		msg := fmt.Sprintf("job %q comes from %s and is read-only; edit %s directly", id, target.Kind, target.Source)
@@ -323,7 +330,16 @@ func plan(op Operation, id string) (target Job, replacement *string, err error) 
 
 // Apply performs op on the job and returns the path of the backup it saved.
 func Apply(op Operation, id string) (backupPath string, err error) {
-	target, replacement, err := plan(op, id)
+	target, err := findJob(id)
+	if err != nil {
+		return "", err
+	}
+
+	if target.Kind == KindTimer {
+		return "", applyTimer(op, target)
+	}
+
+	target, replacement, err := planFor(op, target)
 	if err != nil {
 		return "", err
 	}
@@ -334,7 +350,19 @@ func Apply(op Operation, id string) (backupPath string, err error) {
 // Diff shows what Apply would change, without touching any file. The output
 // is a small unified-style diff with one line of context on each side.
 func Diff(op Operation, id string) (string, error) {
-	target, replacement, err := plan(op, id)
+	target, err := findJob(id)
+	if err != nil {
+		return "", err
+	}
+
+	if target.Kind == KindTimer {
+		if err := checkTimerOp(op, target); err != nil {
+			return "", err
+		}
+		return "Would run: systemctl " + string(op) + " --now " + target.Unit + "\n", nil
+	}
+
+	target, replacement, err := planFor(op, target)
 	if err != nil {
 		return "", err
 	}
@@ -375,3 +403,29 @@ func Enable(id string) (string, error) { return Apply(OpEnable, id) }
 
 // Remove deletes job's line entirely.
 func Remove(id string) (string, error) { return Apply(OpRemove, id) }
+
+// checkTimerOp validates a disable or enable of a systemd timer.
+func checkTimerOp(op Operation, t Job) error {
+	switch {
+	case t.ReadOnly:
+		return fmt.Errorf("timer %q cannot be changed here: %s", t.Unit, t.Note)
+	case op == OpRemove:
+		return fmt.Errorf("Seer does not delete systemd timers; remove %s yourself", t.Source)
+	case op == OpDisable && !t.Enabled:
+		return fmt.Errorf("job %q is already disabled", t.ID)
+	case op == OpEnable && t.Enabled:
+		return fmt.Errorf("job %q is already enabled", t.ID)
+	}
+
+	return nil
+}
+
+// applyTimer enables or disables a timer through systemctl. Nothing is
+// backed up: undo is the opposite command.
+func applyTimer(op Operation, t Job) error {
+	if err := checkTimerOp(op, t); err != nil {
+		return err
+	}
+
+	return systemctlAction(op, t)
+}

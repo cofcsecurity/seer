@@ -3,6 +3,7 @@ package job
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"seer/pkg/job"
 
@@ -12,12 +13,30 @@ import (
 func JobList() *cobra.Command {
 	var userFilter string
 	var onlyDisabled, onlyEnabled, onlyRisky, asJSON bool
+	var since string
 	list := &cobra.Command{
 		Use: "list", Aliases: []string{"ls"},
 		Short: "List scheduled cron jobs across all users",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var window time.Duration
+			if since != "" {
+				var err error
+				if window, err = job.ParseAge(since); err != nil {
+					return err
+				}
+				job.RecentWindow = window
+			}
 			jobs, warnings := job.ListJobs()
+			if since != "" {
+				kept := jobs[:0]
+				for _, j := range jobs {
+					if j.IsRecent() {
+						kept = append(kept, j)
+					}
+				}
+				jobs = kept
+			}
 			color := terminalColor(cmd.OutOrStdout())
 			if asJSON {
 				return printJSON(cmd, filterJobs(jobs, userFilter, onlyDisabled, onlyEnabled, onlyRisky), warnings)
@@ -41,6 +60,7 @@ func JobList() *cobra.Command {
 	list.Flags().BoolVar(&onlyDisabled, "disabled", false, "only show disabled jobs")
 	list.Flags().BoolVar(&onlyEnabled, "enabled", false, "only show enabled jobs")
 	list.Flags().BoolVar(&onlyRisky, "risky", false, "only show root jobs whose command could be tampered with")
+	list.Flags().StringVar(&since, "since", "", "only show jobs whose source changed within this time (for example 24h, 7d)")
 	list.Flags().BoolVar(&asJSON, "json", false, "print jobs as JSON")
 	list.MarkFlagsMutuallyExclusive("disabled", "enabled")
 	return list

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var periodicDirs = []struct {
@@ -69,6 +70,7 @@ func periodicJobs() (jobs []Job, warnings []string) {
 				Command:  path,
 				Raw:      path,
 				Enabled:  note == "",
+				Modified: info.ModTime(),
 				Kind:     KindPeriodic,
 				ReadOnly: true,
 			})
@@ -97,15 +99,21 @@ func anacronJobs(path string) (jobs []Job, warnings []string) {
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
 
+	var modified time.Time
+	if info, err := file.Stat(); err == nil {
+		modified = info.ModTime()
+	}
+
 	lineNumber := 0
 	seen := make(map[string]int)
+	env := newEnvList()
 
 	for scanner.Scan() {
 		lineNumber++
 		raw := scanner.Text()
 		line := strings.TrimSpace(raw)
 
-		if line == "" || strings.HasPrefix(line, "#") {
+		if line == "" || strings.HasPrefix(line, "#") || env.add(raw) {
 			continue
 		}
 
@@ -136,6 +144,9 @@ func anacronJobs(path string) (jobs []Job, warnings []string) {
 			Enabled:    true,
 			Kind:       KindAnacron,
 			ReadOnly:   true,
+			Unit:       fields[2],
+			Modified:   modified,
+			Env:        env.list(),
 		})
 	}
 

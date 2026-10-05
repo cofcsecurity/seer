@@ -20,6 +20,9 @@ func JobRemove() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if target.Kind == job.KindTimer {
+				return fmt.Errorf("Seer does not delete systemd timers; remove %s yourself, or use 'seer job disable'", target.Source)
+			}
 			if preview {
 				text, err := job.Diff(job.OpRemove, args[0])
 				if err != nil {
