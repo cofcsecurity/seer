@@ -8,6 +8,7 @@ import (
 	"seer/cmd/socks"
 	"seer/cmd/ssh"
 	"seer/cmd/users"
+	"seer/cmd/warden"
 
 	"log/slog"
 
@@ -37,6 +38,7 @@ func main() {
 	root.AddCommand(socks.Socks())
 	root.AddCommand(ssh.SSH())
 	root.AddCommand(job.Job())
+	root.AddCommand(warden.Warden())
 
 	root.PersistentFlags().BoolVarP(&verboseLogging, "verbose", "v", false, "enable verbose logging")
 

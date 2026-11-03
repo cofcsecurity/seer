@@ -550,3 +550,89 @@ Backups are kept until deleted. `seer job cleanup` lists and then deletes
 backups older than 30 days. Use `--older-than 12h`, `7d`, or `2w` to change the
 age, and `--yes` to skip the prompt. `--all` deletes every backup, including
 the only copy of any removed job, and asks twice.
+
+### Warden installation
+
+`seer warden` obtains and installs
+[Warden](https://github.com/cofcsecurity/warden) or Quiet Warden
+(`cofcsecurity/quiet-warden`) on the box Seer runs on, then finds the install
+and checks its health. Both builds take the same install options; choose one
+with `--variant warden` (the default) or `--variant quiet-warden`. Run these
+commands as root on Linux.
+
+Install with the team's public key:
+```
+root@system:/# seer warden install --variant quiet-warden --key @team.pub --from 10.0.0.0/24 --safe-accounts admin --yes
+==> Checking access to github.com/cofcsecurity/quiet-warden
+==> Cloning github.com/cofcsecurity/quiet-warden
+==> Building quiet-warden
+==> Installing quiet-warden
+Installed quiet-warden as netmgr
+┌ netmgr
+├ Binary: /usr/local/sbin/netmgr
+├ Data: /var/lib/netmgr
+├ Config: /var/lib/netmgr/config.json
+├ Team key: SHA256:jsbmXD9MxXonCbWzUj0vT8eXuAITY03X2W1s5fjse/Y
+├ Allow from: 10.0.0.0/24
+├ Ban: flag  Lock: flag
+├ Safe accounts: admin
+└ Peers: 0
+Access: ssh -i <team-key> netmgr@<box> status --json
+Next: configure the box, then run 'netmgr arm' and pair it with a peer.
+```
+
+By default Seer makes a shallow clone (`--ref` picks a branch or tag) and builds
+it with Go. Other sources:
+
+- `--release v1.2.3` (or `latest`) downloads `warden-linux-<arch>` and checks
+  it against the release's `SHA256SUMS`. `--sha256` also requires a specific
+  checksum.
+- `--source DIR` builds a clone that is already on the box.
+- `--binary PATH` installs a binary already on the box, optionally checked
+  with `--sha256`.
+
+Builds and downloads go in a private directory under root's home, not `/tmp`,
+which hardened boxes often mount `noexec`. The directory is deleted
+afterwards. Installing again updates the existing install in place. `--json`
+prints Warden's install result unchanged.
+
+Quiet Warden is a private repository. Seer reads a GitHub token from
+`GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token`. Before it clones or downloads
+anything, it checks access and reports a missing token, a rejected token, a
+token without access to the repository, a rate limit, or no network:
+```
+root@system:/# seer warden install --variant quiet-warden --key @team.pub
+==> Checking access to github.com/cofcsecurity/quiet-warden
+Error: cannot access github.com/cofcsecurity/quiet-warden: it is a private repository and no GitHub token was found.
+Set GITHUB_TOKEN (or GH_TOKEN) to a token that can read it, or log in with 'gh auth login'.
+Under sudo the variable is dropped; keep it with: sudo --preserve-env=GITHUB_TOKEN seer warden install ...
+```
+
+Git receives the token in an HTTP header set through its environment
+configuration, so the token is not visible in the process list.
+
+Find the install and check its health:
+```
+root@system:/# seer warden find
+[netmgr] /usr/local/sbin/netmgr data:/var/lib/netmgr
+root@system:/# seer warden status
+┌ netmgr on system
+├ warn not armed: drift is only flagged, not restored
+│      → when the box is configured: netmgr arm
+├ ok   config tier at generation 42 (318 files)
+├ ok   data tier at generation 7 (5120 files)
+├ ok   sentinel ran 55s ago
+├ ok   snapshot ran 1m48s ago
+├ ok   watch ran 30s ago
+└ warn no peers: backups are not kept off this box
+       → pair with another box: netmgr pair key (see Warden docs)
+```
+
+Warden installs under a random name. `find` looks for
+`/var/lib/<name>/config.json` next to a `.spare` copy of the binary. If a box
+has more than one install, pass `--name` to `status` and `uninstall`. `status`
+runs the install's `status --json` and checks it against Warden's health rules.
+It reports an error for a broken store, a failed tier, or an install that says
+it is not installed. `status --json` prints Warden's report unchanged.
+`seer warden uninstall [--force] [--yes]` runs the install's own `uninstall`.
+Backups already copied to peer boxes are left in place.
