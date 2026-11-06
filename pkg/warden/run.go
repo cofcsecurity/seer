@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"hash"
 	"io"
@@ -35,22 +34,33 @@ type InstallOptions struct {
 	Lock         string
 	SafeAccounts []string
 	Yes          bool
+	NoBreakGlass bool
+	PasswordHash string
+	NoPassword   bool
 }
 
-// Args returns the `install` command line, always with --json.
+// Args returns the `install` command line. Warden's install prints a plain
+// summary and next steps; Seer shows it as is and reads status afterwards.
 func (o InstallOptions) Args() []string {
-	args := []string{"install", "--json"}
+	args := []string{"install"}
 	add := func(flag, value string) {
 		if value != "" {
 			args = append(args, flag, value)
 		}
 	}
 	add("--key", o.Key)
+	add("--password-hash", o.PasswordHash)
 	add("--from", o.From)
 	add("--name", o.Name)
 	add("--ban", o.Ban)
 	add("--lock", o.Lock)
 	add("--safe-accounts", strings.Join(o.SafeAccounts, ","))
+	if o.NoPassword {
+		args = append(args, "--no-password")
+	}
+	if o.NoBreakGlass {
+		args = append(args, "--no-break-glass")
+	}
 	if o.Yes {
 		args = append(args, "--yes")
 	}
@@ -62,45 +72,23 @@ func ValidMode(m string) bool {
 	return m == "" || m == "off" || m == "flag" || m == "act"
 }
 
-// InstallResult is the JSON `warden install --json` prints.
-type InstallResult struct {
-	Name               string   `json:"name"`
-	Binary             string   `json:"binary"`
-	DataDir            string   `json:"data_dir"`
-	ConfigPath         string   `json:"config_path"`
-	TeamKeyFingerprint string   `json:"team_key_fingerprint,omitempty"`
-	AllowFrom          string   `json:"allow_from"`
-	Ban                string   `json:"ban"`
-	Lock               string   `json:"lock"`
-	SafeAccounts       []string `json:"safe_accounts,omitempty"`
-	Peers              []string `json:"peers"`
-	Updated            bool     `json:"updated"`
-	Warnings           []string `json:"warnings,omitempty"`
-}
-
 // Run runs a Warden binary with stdin and stderr passed through and returns
 // its stdout. Warden reports failures on stderr with exit status 1.
 func Run(binary string, args []string, stdin io.Reader, stderr io.Writer) ([]byte, error) {
 	var stdout bytes.Buffer
-	cmd := exec.Command(binary, args...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, &stdout, stderr
-	if err := cmd.Run(); err != nil {
-		if exit, ok := err.(*exec.ExitError); ok {
-			return stdout.Bytes(), fmt.Errorf("%s %s exited with status %d (see the message above)", binary, args[0], exit.ExitCode())
-		}
-		return stdout.Bytes(), fmt.Errorf("running %s: %w", binary, err)
-	}
-	return stdout.Bytes(), nil
+	err := RunTo(binary, args, stdin, &stdout, stderr)
+	return stdout.Bytes(), err
 }
 
-// ParseInstall decodes install JSON, ignoring fields added later.
-func ParseInstall(data []byte) (InstallResult, error) {
-	var r InstallResult
-	if err := json.Unmarshal(data, &r); err != nil {
-		return r, fmt.Errorf("warden install printed unexpected output: %w", err)
+// RunTo runs a Warden binary with all three streams connected as given.
+func RunTo(binary string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	cmd := exec.Command(binary, args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	if err := cmd.Run(); err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("%s %s exited with status %d (see the message above)", binary, args[0], exit.ExitCode())
+		}
+		return fmt.Errorf("running %s: %w", binary, err)
 	}
-	if r.Name == "" {
-		return r, fmt.Errorf("warden install output has no name")
-	}
-	return r, nil
+	return nil
 }

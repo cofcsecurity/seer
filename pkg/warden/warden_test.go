@@ -215,19 +215,12 @@ func TestFindAndResolve(t *testing.T) {
 	}
 }
 
-func TestInstallArgsAndParse(t *testing.T) {
-	o := InstallOptions{Key: "@team.pub", From: "10.0.0.0/24", Ban: "act", SafeAccounts: []string{"admin", "scorer"}, Yes: true}
-	want := []string{"install", "--json", "--key", "@team.pub", "--from", "10.0.0.0/24", "--ban", "act", "--safe-accounts", "admin,scorer", "--yes"}
+func TestInstallArgs(t *testing.T) {
+	o := InstallOptions{Key: "@team.pub", From: "10.0.0.0/24", Ban: "act", SafeAccounts: []string{"admin", "scorer"}, NoBreakGlass: true, Yes: true}
+	// Warden's install has no --json flag; Seer must never pass one.
+	want := []string{"install", "--key", "@team.pub", "--from", "10.0.0.0/24", "--ban", "act", "--safe-accounts", "admin,scorer", "--no-break-glass", "--yes"}
 	if got := o.Args(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("args %q", got)
-	}
-
-	r, err := ParseInstall([]byte(`{"name":"netmgr","binary":"/usr/local/sbin/netmgr","updated":true,"future_field":1}`))
-	if err != nil || r.Name != "netmgr" || !r.Updated {
-		t.Fatalf("parse %+v %v", r, err)
-	}
-	if _, err := ParseInstall([]byte("installing...")); err == nil {
-		t.Fatal("accepted non-JSON")
 	}
 }
 
@@ -281,5 +274,40 @@ func TestLookupVariant(t *testing.T) {
 	}
 	if _, err := LookupVariant("loud"); err == nil {
 		t.Error("accepted unknown variant")
+	}
+}
+
+// fakeGo writes a go command that reports version v.
+func fakeGo(t *testing.T, dir, v string) string {
+	t.Helper()
+	p := filepath.Join(dir, "go")
+	os.MkdirAll(dir, 0o755)
+	if err := os.WriteFile(p, []byte("#!/bin/sh\necho go version "+v+" linux/amd64\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestFindGoPicksNewest(t *testing.T) {
+	dir := t.TempDir()
+	old := fakeGo(t, filepath.Join(dir, "usr/bin"), "go1.13.8")
+	current := fakeGo(t, filepath.Join(dir, "usr/local/go/bin"), "go1.26.10")
+	t.Setenv("PATH", filepath.Dir(old))
+	saved := goCandidates
+	t.Cleanup(func() { goCandidates = saved })
+
+	goCandidates = []string{current}
+	if got, err := findGo(); err != nil || got != current {
+		t.Fatalf("got %q, %v; want the newer %s", got, err, current)
+	}
+
+	goCandidates = nil
+	if _, err := findGo(); err == nil || !strings.Contains(err.Error(), "go1.13 at") || !strings.Contains(err.Error(), "1.21 or later") {
+		t.Fatalf("old-only error %v", err)
+	}
+
+	t.Setenv("PATH", t.TempDir())
+	if _, err := findGo(); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("missing error %v", err)
 	}
 }

@@ -560,25 +560,39 @@ and checks its health. Both builds take the same install options; choose one
 with `--variant warden` (the default) or `--variant quiet-warden`. Run these
 commands as root on Linux.
 
-Install with the team's public key:
+Install with the team's public key. Seer shows Warden's own install summary,
+then checks the new install's health:
 ```
-root@system:/# seer warden install --variant quiet-warden --key @team.pub --from 10.0.0.0/24 --safe-accounts admin --yes
-==> Checking access to github.com/cofcsecurity/quiet-warden
-==> Cloning github.com/cofcsecurity/quiet-warden
-==> Building quiet-warden
-==> Installing quiet-warden
-Installed quiet-warden as netmgr
-┌ netmgr
-├ Binary: /usr/local/sbin/netmgr
-├ Data: /var/lib/netmgr
-├ Config: /var/lib/netmgr/config.json
-├ Team key: SHA256:jsbmXD9MxXonCbWzUj0vT8eXuAITY03X2W1s5fjse/Y
-├ Allow from: 10.0.0.0/24
-├ Ban: flag  Lock: flag
-├ Safe accounts: admin
-└ Peers: 0
-Access: ssh -i <team-key> netmgr@<box> status --json
-Next: configure the box, then run 'netmgr arm' and pair it with a peer.
+root@system:/# seer warden install --key @team.pub --from 10.0.0.225 --safe-accounts admin --yes
+==> Checking access to github.com/cofcsecurity/warden
+==> Cloning github.com/cofcsecurity/warden
+==> Building warden
+==> Installing warden
+==> Installing the binary as /usr/local/sbin/udevrelay
+==> Creating access accounts, keys, triggers and timers
+==> Taking the first snapshots
+
+==> Installed as udevrelay. Auto-restore is OFF until you arm.
+
+Connect from the team network with the team's private key:
+  ssh -t -i team udevrelay@<this box>            root shell
+  ssh -i team udevrelay@<this box> status        any warden command
+  ssh -t -i team sslhandler@<this box>            break-glass, same key, separate path
+
+Next:
+  1. Harden, then check that services and scoring work.
+  2. ssh -i team udevrelay@<this box> arm
+  ...
+==> Checking udevrelay
+┌ udevrelay on system
+├ warn not armed: drift is only flagged, not restored
+│      → when the box is configured: udevrelay arm
+├ ok   config tier at generation 1 (195 files)
+├ warn data tier has no snapshot yet
+│      → wait for the timer, or run: udevrelay snapshot --tier data
+├ ok   sentinel ran 0s ago
+└ warn no peers: backups are not kept off this box
+       → pair with another box: udevrelay pair key (see Warden docs)
 ```
 
 By default Seer makes a shallow clone (`--ref` picks a branch or tag) and builds
@@ -594,7 +608,14 @@ it with Go. Other sources:
 Builds and downloads go in a private directory under root's home, not `/tmp`,
 which hardened boxes often mount `noexec`. The directory is deleted
 afterwards. Installing again updates the existing install in place. `--json`
-prints Warden's install result unchanged.
+prints the new install's `status --json` and sends Warden's install text to
+stderr. `--no-break-glass` skips Warden's second access account.
+
+Building needs Go 1.21 or later, which then downloads the exact version Warden
+asks for. Seer uses the newest `go` it finds on PATH, in `/usr/local/go/bin`, or
+in `/usr/lib/go/bin`. So a Go from the official installer works under `sudo`,
+whose `secure_path` leaves those directories out, even when an older distro Go
+is on PATH.
 
 Quiet Warden is a private repository. Seer reads a GitHub token from
 `GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token`. Before it clones or downloads
@@ -615,6 +636,70 @@ configuration, so the token is not visible in the process list.
 `https://` URL. Seer checks it before cloning or downloading anything. A private
 key, a missing or unreadable file, a file with several keys, a truncated key, or
 a key type Warden does not accept each fail with the fix to apply.
+
+#### Team access without preparing a key
+
+When the team cannot make a key on the jump box, Seer makes it on the defended
+box and adds a team password as a second way in:
+```
+root@system:/# seer warden install --generate-key --password --from 10.0.0.225 --role --yes
+Team password:
+Team password again:
+==> Generated a team key (ed25519)
+...
+==> Team private key: shown once, and not kept on this box
+Save it on the jump box as 'team' (copy every line, BEGIN to END), then run: chmod 600 team
+-----BEGIN OPENSSH PRIVATE KEY-----
+...
+```
+
+- `--generate-key` creates an ed25519 keypair with the box's `ssh-keygen`,
+  installs the public half, and prints the private key once. The key is
+  deleted with the build directory. For the other boxes, pass that key's
+  public half with `--key` (`ssh-keygen -y -f team > team.pub`) so one key
+  opens every box.
+- `--password` prompts twice with echo off and needs at least 12 characters.
+  Seer hashes the password itself (SHA-512 crypt, 100000 rounds) and passes
+  only the hash to Warden. Warden takes it on the command line, so local users
+  can see the hash briefly; the high round count slows guessing.
+  `--password-hash` takes a hash you already have (`openssl passwd -6`), and
+  `--no-password` removes the password.
+
+#### Watching the files that matter on each box
+
+Warden's built-in watch list covers accounts, sshd, sudoers, cron, units, and
+the main config of common services. `seer warden profile` adds what it misses,
+from role templates, to the install's `/var/lib/<name>/profile.json`:
+
+| Role | Adds (only if present) |
+|---|---|
+| `base` (always) | `/etc/pam.d/*`, `/etc/security/*.conf`, `/etc/sudoers.d/*`, login scripts, `/etc/resolv.conf`, TCP wrappers, firewall rules (ufw, firewalld, nftables, iptables) |
+| `dns` | dnsmasq, BIND, unbound config and zones |
+| `web` | nginx, Apache, PHP config; `/var/www` and `/srv/www` as data; Django and Flask apps found by `manage.py`, `wsgi.py`, or `app.py` |
+| `db` | `/etc/my.cnf.d/*`, `/etc/mysql/**`, PostgreSQL config, Redis config (never live database files) |
+| `mail` | Postfix, Dovecot, Sendmail, `/etc/aliases` |
+| `fileshare` | Samba, NFS exports, vsftpd, ProFTPD, and each Samba share's folder as data |
+
+```
+root@system:/# seer warden profile --dry-run
+==> Roles for this box: base, db
+Add to /var/lib/udevrelay/profile.json:
+  base  /etc/pam.d/*                config auto-restore   authentication stack; one added line can let anyone in
+  base  /etc/firewalld/zones/*.xml  config confirm-first  firewalld zones
+  db    /etc/my.cnf.d/*             config auto-restore   MySQL/MariaDB server settings
+  ...
+Dry run: nothing written.
+```
+
+Without `--role`, Seer picks every role with its real config present; files
+that ship on most boxes anyway, like `/etc/aliases`, do not pick a role alone.
+Firewall rules, app folders, and share folders are confirm-first: Warden flags
+drift there instead of undoing it, because the team and the scorer change them
+on purpose. Paths already in the profile are kept as they are, and the previous
+file is saved as `profile.json.bak`. After writing, Seer snapshots the new
+paths and shows Warden's `profile validate` result. `--print` prints the
+proposed profile as JSON without an install, and `install --role` applies
+the templates right after installing.
 
 Find the install and check its health:
 ```

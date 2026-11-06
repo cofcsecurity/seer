@@ -28,51 +28,57 @@ func Status() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if in.BinaryMissing {
-				return fmt.Errorf("%s is missing; the sentinel restores it from .spare within ~2 minutes. If it stays missing, re-run seer warden install", in.Binary)
-			}
-			raw, err := warden.Run(in.Binary, []string{"status", "--json"}, nil, cmd.ErrOrStderr())
-			if err != nil {
-				return err
-			}
-			if jsonOut {
-				_, err := cmd.OutOrStdout().Write(raw)
-				return err
-			}
-			s, err := warden.ParseStatus(raw)
-			if err != nil {
-				return err
-			}
-			if s.Name == "" {
-				s.Name = in.Name
-			}
-			findings := warden.Health(s, time.Now())
-
-			out := cmd.OutOrStdout()
-			color := terminalColor(out)
-			fmt.Fprintf(out, "┌ %s on %s\n", paint(s.Name, ansiCyan, color), s.Host)
-			labels := map[warden.Severity]string{
-				warden.OK:   paint("ok  ", ansiGreen, color),
-				warden.Warn: paint("warn", ansiYellow, color),
-				warden.Bad:  paint("FAIL", ansiRed, color),
-			}
-			for i, f := range findings {
-				branch, rail := "├", "│"
-				if i == len(findings)-1 {
-					branch, rail = "└", " "
-				}
-				fmt.Fprintf(out, "%s %s %s\n", branch, labels[f.Severity], f.Message)
-				if f.Action != "" {
-					fmt.Fprintf(out, "%s      → %s\n", rail, f.Action)
-				}
-			}
-			if warden.Worst(findings) == warden.Bad {
-				return errors.New("Warden is not healthy")
-			}
-			return nil
+			return reportStatus(cmd, in, jsonOut)
 		},
 	}
 	status.Flags().StringVar(&name, "name", "", "install name (default: the only install found)")
 	status.Flags().BoolVar(&jsonOut, "json", false, "print Warden's status JSON unchanged")
 	return status
+}
+
+// reportStatus runs the install's 'status --json' and prints its health, or
+// the JSON unchanged. It returns an error when Warden is not healthy.
+func reportStatus(cmd *cobra.Command, in warden.Install, jsonOut bool) error {
+	if in.BinaryMissing {
+		return fmt.Errorf("%s is missing; the sentinel restores it from .spare within ~2 minutes. If it stays missing, re-run seer warden install", in.Binary)
+	}
+	raw, err := warden.Run(in.Binary, []string{"status", "--json"}, nil, cmd.ErrOrStderr())
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		_, err := cmd.OutOrStdout().Write(raw)
+		return err
+	}
+	s, err := warden.ParseStatus(raw)
+	if err != nil {
+		return err
+	}
+	if s.Name == "" {
+		s.Name = in.Name
+	}
+	findings := warden.Health(s, time.Now())
+
+	out := cmd.OutOrStdout()
+	color := terminalColor(out)
+	fmt.Fprintf(out, "┌ %s on %s\n", paint(s.Name, ansiCyan, color), s.Host)
+	labels := map[warden.Severity]string{
+		warden.OK:   paint("ok  ", ansiGreen, color),
+		warden.Warn: paint("warn", ansiYellow, color),
+		warden.Bad:  paint("FAIL", ansiRed, color),
+	}
+	for i, f := range findings {
+		branch, rail := "├", "│"
+		if i == len(findings)-1 {
+			branch, rail = "└", " "
+		}
+		fmt.Fprintf(out, "%s %s %s\n", branch, labels[f.Severity], f.Message)
+		if f.Action != "" {
+			fmt.Fprintf(out, "%s      → %s\n", rail, f.Action)
+		}
+	}
+	if warden.Worst(findings) == warden.Bad {
+		return errors.New("Warden is not healthy")
+	}
+	return nil
 }

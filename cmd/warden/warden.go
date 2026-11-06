@@ -14,12 +14,13 @@ func Warden() *cobra.Command {
 		Use:   "warden",
 		Short: "Install, find, and check Warden or Quiet Warden on this box",
 		Long: "Obtain and install Warden (cofcsecurity/warden) or Quiet Warden (cofcsecurity/quiet-warden),\n" +
-			"then find the install and report its health. Both repositories are private: release\n" +
-			"downloads and clones read a GitHub token from GITHUB_TOKEN, GH_TOKEN, or 'gh auth token'.",
+			"then find the install and report its health. Quiet Warden is private: release downloads\n" +
+			"and clones read a GitHub token from GITHUB_TOKEN, GH_TOKEN, or 'gh auth token'.",
 	}
 	warden.AddCommand(Install())
 	warden.AddCommand(Find())
 	warden.AddCommand(Status())
+	warden.AddCommand(Profile())
 	warden.AddCommand(Uninstall())
 	return warden
 }

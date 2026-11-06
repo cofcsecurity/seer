@@ -42,5 +42,7 @@ func main() {
 
 	root.PersistentFlags().BoolVarP(&verboseLogging, "verbose", "v", false, "enable verbose logging")
 
-	root.Execute()
+	if err := root.Execute(); err != nil {
+		os.Exit(1)
+	}
 }

@@ -18,18 +18,25 @@ import (
 func Install() *cobra.Command {
 	var opts warden.InstallOptions
 	var variant, release, ref, source, binary, pin string
-	var jsonOut bool
+	var jsonOut, generateKey, password bool
+	var roleNames []string
 	install := &cobra.Command{
-		Use:   "install --key <team-pub | @file | https://url>",
+		Use:   "install (--key <team-pub | @file | https://url> | --generate-key)",
 		Short: "Obtain and install Warden or Quiet Warden on this box",
 		Long: "Obtain Warden and run its install on this box. By default Seer clones the repository and\n" +
 			"builds it with Go; --release downloads a GitHub release and verifies it against the\n" +
 			"release's SHA256SUMS; --source builds an existing clone; --binary uses a binary already here.\n\n" +
-			"Use --variant quiet-warden for Quiet Warden. Both repositories are private: Seer checks\n" +
+			"Use --variant quiet-warden for Quiet Warden, which is a private repository: Seer checks\n" +
 			"access before downloading and explains what to fix when the token is missing or lacks access.\n\n" +
+			"Team access: give the team's public key with --key, or let Seer make the keypair here with\n" +
+			"--generate-key and print the private key once (it is not kept on this box). --password adds\n" +
+			"a team password as a second way in, so the team can log in without the key file.\n\n" +
+			"--role adds the important files for this box's role to Warden's watch list after installing\n" +
+			"(see 'seer warden profile --help'); --role alone picks roles from what is on the box.\n\n" +
 			"Installing again updates the existing install in place. Record the printed name: it is the\n" +
 			"binary, the access account, the unit prefix, and the data directory.",
-		Example: "  sudo --preserve-env=GITHUB_TOKEN seer warden install --key @team.pub --from 10.0.0.0/24 --yes\n" +
+		Example: "  sudo seer warden install --generate-key --password --from 10.0.0.0/24 --role --yes\n" +
+			"  sudo --preserve-env=GITHUB_TOKEN seer warden install --key @team.pub --from 10.0.0.0/24 --yes\n" +
 			"  seer warden install --variant quiet-warden --release latest --key @team.pub --safe-accounts admin\n" +
 			"  seer warden install --binary ./warden-linux-amd64 --sha256 <hash> --key @team.pub",
 		Args: cobra.NoArgs,
@@ -57,11 +64,27 @@ func Install() *cobra.Command {
 			if opts.Name != "" && !warden.ValidName(opts.Name) {
 				return fmt.Errorf("invalid --name %q", opts.Name)
 			}
-			if opts.Key == "" {
-				if found, _ := warden.Find(); len(found) == 0 {
-					return errors.New("--key is required on first install (team public key, @file, or https URL)")
+			if generateKey && opts.Key != "" {
+				return errors.New("use --key or --generate-key, not both")
+			}
+			if n := countTrue(password, opts.PasswordHash != "", opts.NoPassword); n > 1 {
+				return errors.New("use only one of --password, --password-hash, and --no-password")
+			}
+			if opts.PasswordHash != "" {
+				if err := warden.CheckPasswordHash(opts.PasswordHash); err != nil {
+					return err
 				}
-			} else {
+				opts.PasswordHash = strings.TrimSpace(opts.PasswordHash)
+			}
+			if err := warden.CheckRoles(roleNames); err != nil {
+				return err
+			}
+			if opts.Key == "" && !generateKey {
+				if found, _ := warden.Find(); len(found) == 0 {
+					return errors.New("the team key is required on first install: give it with --key (public key, @file, or https URL),\n" +
+						"or use --generate-key to have Seer make one here and print the private key for the team")
+				}
+			} else if opts.Key != "" {
 				// Check the key before any clone or download, so a bad key fails fast.
 				key, err := warden.ResolveKey(cmd.Context(), opts.Key)
 				if err != nil {
@@ -77,26 +100,57 @@ func Install() *cobra.Command {
 			}
 			defer os.RemoveAll(work)
 
+			// Ask for the password and make the key before the slow clone and
+			// build, so the team is not left waiting at a prompt.
+			if password {
+				plain, err := warden.PromptPassword()
+				if err != nil {
+					return err
+				}
+				if opts.PasswordHash, err = warden.HashPassword(plain); err != nil {
+					return err
+				}
+			}
+			var privateKey string
+			if generateKey {
+				host, _ := os.Hostname()
+				if opts.Key, privateKey, err = warden.GenerateTeamKey(work, "team@"+host); err != nil {
+					return err
+				}
+				fmt.Fprintln(log, "==> Generated a team key (ed25519)")
+			}
+
 			bin, err := obtain(cmd.Context(), v, release, ref, source, binary, pin, work, log)
 			if err != nil {
 				return err
 			}
 
 			fmt.Fprintf(log, "==> Installing %s\n", v.Name)
-			out, err := warden.Run(bin, opts.Args(), cmd.InOrStdin(), log)
-			if err != nil {
-				return err
-			}
-			result, err := warden.ParseInstall(out)
-			if err != nil {
-				return err
-			}
+			// Warden prints the install name, how to connect, and next steps.
+			// With --json, stdout is kept for the status JSON alone.
+			wardenOut := cmd.OutOrStdout()
 			if jsonOut {
-				_, err := cmd.OutOrStdout().Write(out)
+				wardenOut = log
+			}
+			if err := warden.RunTo(bin, opts.Args(), cmd.InOrStdin(), wardenOut, log); err != nil {
 				return err
 			}
-			printInstall(cmd.OutOrStdout(), result, v)
-			return nil
+			if privateKey != "" {
+				printPrivateKey(wardenOut, privateKey, terminalColor(wardenOut))
+			}
+
+			in, err := warden.Resolve(opts.Name)
+			if err != nil {
+				return fmt.Errorf("installed, but Seer could not find the install to check it: %w", err)
+			}
+			if cmd.Flags().Changed("role") {
+				fmt.Fprintf(log, "==> Adding role files to %s\n", in.ProfilePath())
+				if err := applyProfile(cmd, in, roleNames, opts.Yes, false); err != nil {
+					return fmt.Errorf("installed, but the role profile was not applied: %w\nRun it again with: seer warden profile --role %s", err, strings.Join(roleNames, ","))
+				}
+			}
+			fmt.Fprintf(log, "==> Checking %s\n", in.Name)
+			return reportStatus(cmd, in, jsonOut)
 		},
 	}
 	f := install.Flags()
@@ -107,17 +161,51 @@ func Install() *cobra.Command {
 	f.StringVar(&binary, "binary", "", "install this Warden binary instead of downloading one")
 	f.StringVar(&pin, "sha256", "", "require this SHA-256 for the release or --binary")
 	f.StringVar(&opts.Key, "key", "", "team SSH public key, @file, or https:// URL (required on first install)")
+	f.BoolVar(&generateKey, "generate-key", false, "make the team keypair here and print the private key once, instead of --key")
+	f.BoolVar(&password, "password", false, "prompt for a team password to allow as a second way in")
+	f.StringVar(&opts.PasswordHash, "password-hash", "", "set the team password from a crypt hash ($6$..., from: openssl passwd -6)")
+	f.BoolVar(&opts.NoPassword, "no-password", false, "remove the team password; the key is the only way in")
+	f.StringSliceVar(&roleNames, "role", nil, "add role files to the watch list: auto (the default when given alone), "+strings.Join(warden.RoleNames(), ", "))
+	f.Lookup("role").NoOptDefVal = "auto"
 	f.StringVar(&opts.From, "from", "", `team network: IPs/CIDRs, comma-separated, or "any" (default: the SSH client's /24)`)
 	f.StringVar(&opts.Name, "name", "", "install name (default: Warden picks one that blends in)")
 	f.StringVar(&opts.Ban, "ban", "", "IP ban response: off, flag, or act (default flag)")
 	f.StringVar(&opts.Lock, "lock", "", "account lock response: off, flag, or act (default flag)")
 	f.StringSliceVar(&opts.SafeAccounts, "safe-accounts", nil, "accounts Warden never locks (team and scoring accounts)")
 	f.BoolVarP(&opts.Yes, "yes", "y", false, "do not prompt; accept defaults")
-	f.BoolVar(&jsonOut, "json", false, "print Warden's install result as JSON")
+	f.BoolVar(&opts.NoBreakGlass, "no-break-glass", false, "skip Warden's second, independent access account")
+	f.BoolVar(&jsonOut, "json", false, "print the new install's status JSON (Warden's install text goes to stderr)")
+	_ = install.RegisterFlagCompletionFunc("role", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return append([]string{"auto"}, warden.RoleNames()...), cobra.ShellCompDirectiveNoFileComp
+	})
 	_ = install.RegisterFlagCompletionFunc("variant", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return warden.VariantNames(), cobra.ShellCompDirectiveNoFileComp
 	})
 	return install
+}
+
+func countTrue(values ...bool) int {
+	n := 0
+	for _, v := range values {
+		if v {
+			n++
+		}
+	}
+	return n
+}
+
+// printPrivateKey shows the generated team key once, with how to use it.
+func printPrivateKey(out io.Writer, key string, color bool) {
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, paint("==> Team private key: shown once, and not kept on this box", ansiYellow, color))
+	fmt.Fprintln(out, "Save it on the jump box as 'team' (copy every line, BEGIN to END), then run: chmod 600 team")
+	fmt.Fprint(out, key)
+	if !strings.HasSuffix(key, "\n") {
+		fmt.Fprintln(out)
+	}
+	fmt.Fprintln(out, "Use the same key on every box: install the others with --key and this box's public key")
+	fmt.Fprintln(out, "(ssh-keygen -y -f team > team.pub on the jump box).")
+	fmt.Fprintln(out)
 }
 
 // workDir makes a private scratch directory for the download or build. It
@@ -207,31 +295,4 @@ func checkBinary(binary, pin string) (string, error) {
 		return "", err
 	}
 	return abs, nil
-}
-
-func printInstall(out io.Writer, r warden.InstallResult, v warden.Variant) {
-	color := terminalColor(out)
-	verb := "Installed"
-	if r.Updated {
-		verb = "Updated"
-	}
-	fmt.Fprintln(out, paint(fmt.Sprintf("%s %s as %s", verb, v.Name, r.Name), ansiGreen, color))
-	fmt.Fprintf(out, "┌ %s\n", paint(r.Name, ansiCyan, color))
-	fmt.Fprintf(out, "├ Binary: %s\n", r.Binary)
-	fmt.Fprintf(out, "├ Data: %s\n", r.DataDir)
-	fmt.Fprintf(out, "├ Config: %s\n", r.ConfigPath)
-	if r.TeamKeyFingerprint != "" {
-		fmt.Fprintf(out, "├ Team key: %s\n", r.TeamKeyFingerprint)
-	}
-	fmt.Fprintf(out, "├ Allow from: %s\n", r.AllowFrom)
-	fmt.Fprintf(out, "├ Ban: %s  Lock: %s\n", r.Ban, r.Lock)
-	if len(r.SafeAccounts) > 0 {
-		fmt.Fprintf(out, "├ Safe accounts: %s\n", strings.Join(r.SafeAccounts, ", "))
-	}
-	fmt.Fprintf(out, "└ Peers: %d\n", len(r.Peers))
-	for _, w := range r.Warnings {
-		fmt.Fprintln(out, paint("Warning: "+w, ansiYellow, color))
-	}
-	fmt.Fprintf(out, "Access: ssh -i <team-key> %s@<box> status --json\n", r.Name)
-	fmt.Fprintf(out, "Next: configure the box, then run '%s arm' and pair it with a peer.\n", r.Name)
 }

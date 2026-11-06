@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -267,12 +269,84 @@ func Clone(ctx context.Context, repo, ref, token, tokenSource, dest string) erro
 	return fmt.Errorf("git clone of %s failed: %s", repo, text)
 }
 
+// goCandidates are where Go's own installer and distro packages put go. sudo
+// resets PATH to secure_path, which usually leaves these off it, and a box
+// can have an old distro Go on PATH next to a current one here.
+var goCandidates = []string{"/usr/local/go/bin/go", "/usr/lib/go/bin/go"}
+
+// minGo is the oldest Go that can build Warden: from 1.21, GOTOOLCHAIN=auto
+// downloads the exact version Warden's go.mod asks for.
+var minGo = [2]int{1, 21}
+
+// findGo returns the newest go command on PATH or in a standard location.
+func findGo() (string, error) {
+	var candidates []string
+	if p, err := exec.LookPath("go"); err == nil {
+		candidates = append(candidates, p)
+	}
+	candidates = append(candidates, goCandidates...)
+
+	best, bestVersion := "", [2]int{}
+	seen := map[string]bool{}
+	var found []string
+	for _, c := range candidates {
+		real, err := filepath.EvalSymlinks(c)
+		if err != nil || seen[real] {
+			continue
+		}
+		seen[real] = true
+		v, ok := goVersion(c)
+		if !ok {
+			continue
+		}
+		found = append(found, fmt.Sprintf("go%d.%d at %s", v[0], v[1], c))
+		if best == "" || versionLess(bestVersion, v) {
+			best, bestVersion = c, v
+		}
+	}
+	if best == "" {
+		return "", errors.New("go was not found on PATH or in " + strings.Join(goCandidates, " or ") + ".\n" +
+			"Install Go (https://go.dev/doc/install), or use --release or --binary.\n" +
+			"Under sudo, PATH is reset to secure_path, so a go elsewhere in your own PATH is not seen.")
+	}
+	if versionLess(bestVersion, minGo) {
+		return "", fmt.Errorf("found only Go too old to build Warden (%s); it needs Go %d.%d or later,\n"+
+			"which then downloads the exact version Warden asks for. Install Go from https://go.dev/doc/install,\n"+
+			"or use --release or --binary.", strings.Join(found, ", "), minGo[0], minGo[1])
+	}
+	return best, nil
+}
+
+// goVersion reads "go version go1.26.3 linux/amd64" into {1, 26}.
+func goVersion(bin string) ([2]int, bool) {
+	out, err := exec.Command(bin, "version").Output()
+	if err != nil {
+		return [2]int{}, false
+	}
+	for _, f := range strings.Fields(string(out)) {
+		if !strings.HasPrefix(f, "go1.") {
+			continue
+		}
+		parts := strings.SplitN(strings.TrimPrefix(f, "go"), ".", 3)
+		major, err1 := strconv.Atoi(parts[0])
+		minor, err2 := strconv.Atoi(strings.TrimRightFunc(parts[1], func(r rune) bool { return r < '0' || r > '9' }))
+		if err1 == nil && err2 == nil {
+			return [2]int{major, minor}, true
+		}
+	}
+	return [2]int{}, false
+}
+
+func versionLess(a, b [2]int) bool {
+	return a[0] < b[0] || a[0] == b[0] && a[1] < b[1]
+}
+
 // Build compiles cmd/warden in a clone with the flags Warden's own build
 // uses. GOTOOLCHAIN=auto lets an older Go fetch the version go.mod requires.
 func Build(ctx context.Context, srcDir, dest, workDir string, log io.Writer) error {
-	goBin, err := exec.LookPath("go")
+	goBin, err := findGo()
 	if err != nil {
-		return errors.New("go is not installed; install Go (https://go.dev/doc/install), or use --release or --binary")
+		return err
 	}
 	if _, err := os.Stat(srcDir + "/cmd/warden"); err != nil {
 		return fmt.Errorf("%s is not a Warden source tree (no cmd/warden)", srcDir)
