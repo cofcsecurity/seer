@@ -61,6 +61,13 @@ func Install() *cobra.Command {
 				if found, _ := warden.Find(); len(found) == 0 {
 					return errors.New("--key is required on first install (team public key, @file, or https URL)")
 				}
+			} else {
+				// Check the key before any clone or download, so a bad key fails fast.
+				key, err := warden.ResolveKey(cmd.Context(), opts.Key)
+				if err != nil {
+					return err
+				}
+				opts.Key = key
 			}
 
 			log := cmd.ErrOrStderr()

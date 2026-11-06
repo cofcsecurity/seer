@@ -611,6 +611,11 @@ Under sudo the variable is dropped; keep it with: sudo --preserve-env=GITHUB_TOK
 Git receives the token in an HTTP header set through its environment
 configuration, so the token is not visible in the process list.
 
+`--key` takes the team's public key as the key line itself, `@file`, or an
+`https://` URL. Seer checks it before cloning or downloading anything. A private
+key, a missing or unreadable file, a file with several keys, a truncated key, or
+a key type Warden does not accept each fail with the fix to apply.
+
 Find the install and check its health:
 ```
 root@system:/# seer warden find
